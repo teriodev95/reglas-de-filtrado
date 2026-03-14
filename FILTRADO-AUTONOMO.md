@@ -344,7 +344,7 @@ Shape minimo:
       "c08_nombre_cliente_coincide": true,
       "c09_nombre_aval_coincide": true,
       "c13_persona_id_aval_asignado": false,
-      "r01_cliente_aval_mismo_domicilio": false
+      "r01_cliente_aval_no_comparten_domicilio": false
     },
     "acciones": [],
     "meta": {
@@ -372,7 +372,7 @@ cURL minimo:
 ```bash
 curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/filtrado' \
   -H 'Content-Type: application/json' \
-  -d '{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z","resultado_filtrado":{"checks":{"c08_nombre_cliente_coincide":true,"c09_nombre_aval_coincide":true,"c13_persona_id_aval_asignado":false,"r01_cliente_aval_mismo_domicilio":false},"acciones":[],"meta":{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z"},"detalle":{"cliente":{"persona_id":"J0CP-5933-53QC-de","score_final":100},"aval":{"persona_id":null},"tabla_cargos":{"id":35}},"tabla_cargos_id_sugerido":35}}'
+  -d '{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z","resultado_filtrado":{"checks":{"c08_nombre_cliente_coincide":true,"c09_nombre_aval_coincide":true,"c13_persona_id_aval_asignado":false,"r01_cliente_aval_no_comparten_domicilio":false},"acciones":[],"meta":{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z"},"detalle":{"cliente":{"persona_id":"J0CP-5933-53QC-de","score_final":100},"aval":{"persona_id":null},"tabla_cargos":{"id":35}},"tabla_cargos_id_sugerido":35}}'
 ```
 
 cURL de visto bueno:
@@ -401,7 +401,7 @@ curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/chec
 - c10, c11 — CURP valido
 - c12, c13 — persona_id asignado
 - c14, c15, c16, c17 — validaciones del aval (historial + liquidaciones + agencia)
-- r01 — mismo domicilio
+- r01 — cliente y aval no comparten domicilio
 - c21, c22 — monto y nivel
 - c24 — ultima semana respetada
 - c25, c26 — score y liquidaciones del cliente
