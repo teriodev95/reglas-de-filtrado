@@ -349,6 +349,178 @@ Los checks se guardan como `true`, `false` o `null` planos. No usar objetos.
 
 Referencia completa: `matriz-validacion-filtrado-v2.md`
 
+## Contrato fijo de `checks`
+
+Los `checks` del filtrado viven dentro de `resultado_filtrado.checks`.
+
+Reglas:
+
+- cada check debe ser una llave plana
+- cada valor debe ser solo `true`, `false` o `null`
+- no usar strings como `"true"` o `"false"`
+- no usar objetos anidados por check
+- no omitir `checks` cuando se va a guardar resultado de filtrado
+
+Shape minimo:
+
+```json
+{
+  "resultado_filtrado": {
+    "checks": {
+      "c08_nombre_cliente_coincide": true,
+      "c09_nombre_aval_coincide": true,
+      "c13_persona_id_aval_asignado": false,
+      "r01_cliente_aval_mismo_domicilio": false
+    },
+    "acciones": [],
+    "meta": {
+      "status_filtrado": "requiere_correccion",
+      "filtered_by": "bot",
+      "filtered_at": "2026-03-14T18:00:00.000Z",
+      "alertas": [],
+      "bloqueos": [
+        "aval_sin_persona_id",
+        "domicilio_compartido"
+      ],
+      "recomendaciones": [
+        "asignar aval correcto o nuevo",
+        "validar excepcion documental"
+      ]
+    },
+    "detalle": {
+      "cliente": {
+        "persona_id": "J0CP-5933-53QC-de",
+        "score_final": 100
+      },
+      "aval": {
+        "persona_id": null,
+        "fue_cliente": false,
+        "score_como_cliente": null,
+        "clientes_avalados_scores": []
+      },
+      "domicilio": {
+        "identificador": "NS-12345",
+        "tipo": "no_servicio",
+        "clientes_activos": 1,
+        "saldo_activo": 355.5,
+        "saldo_con_nuevo": 4355.5,
+        "limite": 30000
+      },
+      "tabla_cargos": {
+        "id": 35,
+        "monto": 4000,
+        "nivel": "NOBEL",
+        "plazo": 16,
+        "tarifa": 362.5,
+        "total_pagar": 5800
+      }
+    },
+    "tabla_cargos_id_sugerido": 35
+  }
+}
+```
+
+## cURL minimo para guardar checks de filtrado
+
+```bash
+curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/filtrado' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status_filtrado": "requiere_correccion",
+    "filtered_by": "bot",
+    "filtered_at": "2026-03-14T18:00:00.000Z",
+    "diagnostico": "Se detectaron bloqueos que requieren correccion antes de autorizacion.",
+    "resultado_filtrado": {
+      "checks": {
+        "c08_nombre_cliente_coincide": true,
+        "c09_nombre_aval_coincide": true,
+        "c13_persona_id_aval_asignado": false,
+        "r01_cliente_aval_mismo_domicilio": false
+      },
+      "acciones": [
+        {
+          "tipo": "correccion",
+          "campo": "aval_curp",
+          "estado": "aplicada",
+          "detalle": "Se corrigio CURP del aval con evidencia documental.",
+          "evidencia": ["ocr_ine_aval", "comparacion_curp"],
+          "timestamp": "2026-03-14T18:00:00.000Z"
+        }
+      ],
+      "meta": {
+        "status_filtrado": "requiere_correccion",
+        "filtered_by": "bot",
+        "filtered_at": "2026-03-14T18:00:00.000Z",
+        "alertas": [],
+        "bloqueos": ["aval_sin_persona_id", "domicilio_compartido"],
+        "recomendaciones": ["asignar aval correcto o nuevo"]
+      },
+      "detalle": {
+        "cliente": {
+          "persona_id": "J0CP-5933-53QC-de",
+          "score_final": 100
+        },
+        "aval": {
+          "persona_id": null,
+          "fue_cliente": false,
+          "score_como_cliente": null,
+          "clientes_avalados_scores": []
+        },
+        "tabla_cargos": {
+          "id": 35,
+          "monto": 4000,
+          "nivel": "NOBEL",
+          "plazo": 16,
+          "tarifa": 362.5,
+          "total_pagar": 5800
+        }
+      },
+      "tabla_cargos_id_sugerido": 35
+    }
+  }'
+```
+
+## cURL minimo para guardar un visto bueno
+
+```bash
+curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/check/oficina' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "decision": "aprobado_con_ajuste",
+    "aprobado": true,
+    "userId": "USR001",
+    "userName": "Oficina",
+    "notas": "Se aprueba con ajuste de monto y plazo.",
+    "pinValidado": true,
+    "montoAutorizado": 4000,
+    "nivelAutorizado": "NOBEL",
+    "plazoAutorizado": 16,
+    "tablaCargosIdSugerido": 35,
+    "decisionPayload": {
+      "motivo": "Plan viable segun revision.",
+      "monto_solicitado_original": 4500,
+      "monto_autorizado": 4000,
+      "nivel_original": "NOBEL",
+      "nivel_autorizado": "NOBEL",
+      "plazo_original": 21,
+      "plazo_autorizado": 16,
+      "tabla_cargos_id_sugerido": 35
+    }
+  }'
+```
+
+## Errores comunes
+
+- mandar `checks` fuera de `resultado_filtrado`
+- mandar `"true"` o `"false"` como texto
+- no mandar `filtered_by` ni `filtered_at` al tomar la solicitud
+- mandar `acciones.evidencia` como string en lugar de array
+- mandar `status_filtrado` distinto de:
+  - `pendiente`
+  - `sin_hallazgos`
+  - `con_hallazgos`
+  - `requiere_correccion`
+
 ### Nunca dejar en null (el bot siempre puede resolver)
 
 - c08, c09 — nombres vs INE
