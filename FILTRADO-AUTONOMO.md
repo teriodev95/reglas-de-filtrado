@@ -117,6 +117,12 @@ Reglas minimas:
 
 `status_revision` no controla la ruta. Solo describe el resultado puntual de revision.
 
+Regla de cierre:
+
+- si el bot guarda `status_filtrado = sin_hallazgos`, la solicitud debe quedar en `en_vistos_buenos`
+- si el bot guarda `status_filtrado = requiere_correccion`, la solicitud debe quedar en `en_correccion`
+- despues de guardar, volver a leer la solicitud y validar que `status`, `filtrado.status` y `ruta_solicitud` no queden desalineados
+
 ## Toma de solicitud para filtrado
 
 En cuanto el bot empiece a trabajar una solicitud debe tomarla.

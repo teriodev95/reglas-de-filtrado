@@ -27,10 +27,14 @@ Usa este flujo para filtrar una solicitud de forma autonoma.
 
 - `status` controla la ruta
 - al tomar la solicitud debe quedar `en_filtrado`
+- al cerrar filtrado:
+  - `sin_hallazgos` -> `status = en_vistos_buenos`
+  - `requiere_correccion` -> `status = en_correccion`
 - usar `filtered_at` para detectar colgadas
 - `checks` van en `resultado_filtrado.checks`
 - cada check solo puede ser `true`, `false` o `null`
 - `acciones` deben llevar `tipo`, `campo`, `estado`, `detalle`, `evidencia`, `timestamp`
+- despues de guardar, volver a leer la solicitud y verificar que `status`, `filtrado.status` y `ruta_solicitud` queden alineados
 
 ## cURL minimo
 
