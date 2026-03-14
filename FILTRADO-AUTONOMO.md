@@ -31,6 +31,89 @@ curl --location 'https://elysia.xpress1.cc/api/solicitudes-app/{id}'
 curl --location 'https://elysia.xpress1.cc/api/filtrado-clientes/historial/{persona_id}'
 ```
 
+## Notificaciones del bot
+
+El bot debe informar avances durante el filtrado usando un canal fijo por `solicitud_id`.
+
+Credenciales v1:
+
+- endpoint: `https://centrifugo-api.terio.dev/api/publish`
+- api key: `9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065`
+
+Canal fijo:
+
+- `solicitud.{solicitud_id}`
+
+Ejemplo:
+
+- `solicitud.5c546214-5400-4916-8aa4-5d2df76d358c`
+
+## Contrato fijo de mensaje
+
+```json
+{
+  "channel": "solicitud.{solicitud_id}",
+  "data": {
+    "type": "bot.message",
+    "solicitud_id": "{solicitud_id}",
+    "stage": "inicio_filtrado",
+    "status": "en_filtrado",
+    "message": "Se inicio el filtrado de la solicitud.",
+    "detail": "Se tomo la solicitud y se marcó en_filtrado con filtered_by y filtered_at.",
+    "progress": {
+      "current": 1,
+      "total": 7,
+      "label": "Cargar solicitud"
+    },
+    "meta": {
+      "filtered_by": "bot",
+      "filtered_at": "2026-03-14T12:00:00.000Z"
+    },
+    "timestamp": "2026-03-14T12:00:00.000Z"
+  }
+}
+```
+
+## Reglas del mensaje
+
+- `type` siempre debe ser `bot.message`
+- `solicitud_id` siempre debe venir
+- `channel` siempre debe ser `solicitud.{solicitud_id}`
+- `stage` debe ser corto, estable y en `snake_case`
+- `status` debe reflejar el estado actual de la solicitud
+- `message` debe ser corto y entendible de un vistazo
+- `detail` debe explicar el avance de forma concisa pero util
+- `progress.current` y `progress.total` deben reflejar el paso real del flujo
+- `timestamp` siempre en ISO UTC
+
+## Stages recomendados
+
+- `inicio_filtrado`
+- `consulta_historial`
+- `consulta_mcp`
+- `validacion_checks`
+- `correccion_datos`
+- `guardado_resultado`
+- `fin_filtrado`
+
+## Eventos minimos obligatorios
+
+Enviar al menos estos mensajes:
+
+1. cuando el bot toma la solicitud
+2. cuando detecta un bloqueo o hallazgo importante
+3. cuando corrige un dato relevante
+4. cuando guarda el resultado final
+
+## Ejemplo cURL
+
+```bash
+curl -X POST 'https://centrifugo-api.terio.dev/api/publish' \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: 9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065' \
+  -d '{"channel":"solicitud.{solicitud_id}","data":{"type":"bot.message","solicitud_id":"{solicitud_id}","stage":"inicio_filtrado","status":"en_filtrado","message":"Se inicio el filtrado de la solicitud.","detail":"Se tomo la solicitud y se marcó en_filtrado con filtered_by y filtered_at.","progress":{"current":1,"total":7,"label":"Cargar solicitud"},"meta":{"filtered_by":"bot","filtered_at":"2026-03-14T12:00:00.000Z"},"timestamp":"2026-03-14T12:00:00.000Z"}}'
+```
+
 ## Status de la solicitud
 
 El campo `status` controla la ruta del expediente. No usar otro campo para eso.
