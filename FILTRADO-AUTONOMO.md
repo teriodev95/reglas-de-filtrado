@@ -33,22 +33,20 @@ curl --location 'https://elysia.xpress1.cc/api/filtrado-clientes/historial/{pers
 
 ## Notificaciones del bot
 
-El bot debe informar avances durante el filtrado usando un canal fijo por `solicitud_id`.
-
-Credenciales v1:
-
-- endpoint: `https://centrifugo-api.terio.dev/api/publish`
-- api key: `9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065`
-
-Canal fijo:
+Canal fijo por solicitud:
 
 - `solicitud.{solicitud_id}`
 
-Ejemplo:
+Endpoint v1:
 
-- `solicitud.5c546214-5400-4916-8aa4-5d2df76d358c`
+- `https://centrifugo-api.terio.dev/api/publish`
 
-## Contrato fijo de mensaje
+Headers:
+
+- `Content-Type: application/json`
+- `X-API-Key: 9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065`
+
+Payload minimo:
 
 ```json
 {
@@ -74,38 +72,15 @@ Ejemplo:
 }
 ```
 
-## Reglas del mensaje
+Reglas:
 
-- `type` siempre debe ser `bot.message`
-- `solicitud_id` siempre debe venir
-- `channel` siempre debe ser `solicitud.{solicitud_id}`
-- `stage` debe ser corto, estable y en `snake_case`
-- `status` debe reflejar el estado actual de la solicitud
-- `message` debe ser corto y entendible de un vistazo
-- `detail` debe explicar el avance de forma concisa pero util
-- `progress.current` y `progress.total` deben reflejar el paso real del flujo
-- `timestamp` siempre en ISO UTC
+- `type` siempre `bot.message`
+- `stage` corto y estable en `snake_case`
+- `status` debe reflejar el estado actual
+- `timestamp` siempre ISO UTC
+- eventos minimos: toma, bloqueo relevante, correccion relevante y guardado final
 
-## Stages recomendados
-
-- `inicio_filtrado`
-- `consulta_historial`
-- `consulta_mcp`
-- `validacion_checks`
-- `correccion_datos`
-- `guardado_resultado`
-- `fin_filtrado`
-
-## Eventos minimos obligatorios
-
-Enviar al menos estos mensajes:
-
-1. cuando el bot toma la solicitud
-2. cuando detecta un bloqueo o hallazgo importante
-3. cuando corrige un dato relevante
-4. cuando guarda el resultado final
-
-## Ejemplo cURL
+cURL:
 
 ```bash
 curl -X POST 'https://centrifugo-api.terio.dev/api/publish' \
@@ -351,15 +326,14 @@ Referencia completa: `matriz-validacion-filtrado-v2.md`
 
 ## Contrato fijo de `checks`
 
-Los `checks` del filtrado viven dentro de `resultado_filtrado.checks`.
+Los `checks` viven en `resultado_filtrado.checks`.
 
-Reglas:
+Reglas minimas:
 
-- cada check debe ser una llave plana
-- cada valor debe ser solo `true`, `false` o `null`
-- no usar strings como `"true"` o `"false"`
-- no usar objetos anidados por check
-- no omitir `checks` cuando se va a guardar resultado de filtrado
+- llave plana
+- valor solo `true`, `false` o `null`
+- no usar `"true"` o `"false"`
+- no anidar objetos por check
 
 Shape minimo:
 
@@ -376,43 +350,16 @@ Shape minimo:
     "meta": {
       "status_filtrado": "requiere_correccion",
       "filtered_by": "bot",
-      "filtered_at": "2026-03-14T18:00:00.000Z",
-      "alertas": [],
-      "bloqueos": [
-        "aval_sin_persona_id",
-        "domicilio_compartido"
-      ],
-      "recomendaciones": [
-        "asignar aval correcto o nuevo",
-        "validar excepcion documental"
-      ]
+      "filtered_at": "2026-03-14T18:00:00.000Z"
     },
     "detalle": {
       "cliente": {
         "persona_id": "J0CP-5933-53QC-de",
         "score_final": 100
       },
-      "aval": {
-        "persona_id": null,
-        "fue_cliente": false,
-        "score_como_cliente": null,
-        "clientes_avalados_scores": []
-      },
-      "domicilio": {
-        "identificador": "NS-12345",
-        "tipo": "no_servicio",
-        "clientes_activos": 1,
-        "saldo_activo": 355.5,
-        "saldo_con_nuevo": 4355.5,
-        "limite": 30000
-      },
+      "aval": { "persona_id": null },
       "tabla_cargos": {
-        "id": 35,
-        "monto": 4000,
-        "nivel": "NOBEL",
-        "plazo": 16,
-        "tarifa": 362.5,
-        "total_pagar": 5800
+        "id": 35
       }
     },
     "tabla_cargos_id_sugerido": 35
@@ -420,93 +367,20 @@ Shape minimo:
 }
 ```
 
-## cURL minimo para guardar checks de filtrado
+cURL minimo:
 
 ```bash
 curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/filtrado' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "status_filtrado": "requiere_correccion",
-    "filtered_by": "bot",
-    "filtered_at": "2026-03-14T18:00:00.000Z",
-    "diagnostico": "Se detectaron bloqueos que requieren correccion antes de autorizacion.",
-    "resultado_filtrado": {
-      "checks": {
-        "c08_nombre_cliente_coincide": true,
-        "c09_nombre_aval_coincide": true,
-        "c13_persona_id_aval_asignado": false,
-        "r01_cliente_aval_mismo_domicilio": false
-      },
-      "acciones": [
-        {
-          "tipo": "correccion",
-          "campo": "aval_curp",
-          "estado": "aplicada",
-          "detalle": "Se corrigio CURP del aval con evidencia documental.",
-          "evidencia": ["ocr_ine_aval", "comparacion_curp"],
-          "timestamp": "2026-03-14T18:00:00.000Z"
-        }
-      ],
-      "meta": {
-        "status_filtrado": "requiere_correccion",
-        "filtered_by": "bot",
-        "filtered_at": "2026-03-14T18:00:00.000Z",
-        "alertas": [],
-        "bloqueos": ["aval_sin_persona_id", "domicilio_compartido"],
-        "recomendaciones": ["asignar aval correcto o nuevo"]
-      },
-      "detalle": {
-        "cliente": {
-          "persona_id": "J0CP-5933-53QC-de",
-          "score_final": 100
-        },
-        "aval": {
-          "persona_id": null,
-          "fue_cliente": false,
-          "score_como_cliente": null,
-          "clientes_avalados_scores": []
-        },
-        "tabla_cargos": {
-          "id": 35,
-          "monto": 4000,
-          "nivel": "NOBEL",
-          "plazo": 16,
-          "tarifa": 362.5,
-          "total_pagar": 5800
-        }
-      },
-      "tabla_cargos_id_sugerido": 35
-    }
-  }'
+  -d '{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z","resultado_filtrado":{"checks":{"c08_nombre_cliente_coincide":true,"c09_nombre_aval_coincide":true,"c13_persona_id_aval_asignado":false,"r01_cliente_aval_mismo_domicilio":false},"acciones":[],"meta":{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z"},"detalle":{"cliente":{"persona_id":"J0CP-5933-53QC-de","score_final":100},"aval":{"persona_id":null},"tabla_cargos":{"id":35}},"tabla_cargos_id_sugerido":35}}'
 ```
 
-## cURL minimo para guardar un visto bueno
+cURL de visto bueno:
 
 ```bash
 curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/check/oficina' \
   -H 'Content-Type: application/json' \
-  -d '{
-    "decision": "aprobado_con_ajuste",
-    "aprobado": true,
-    "userId": "USR001",
-    "userName": "Oficina",
-    "notas": "Se aprueba con ajuste de monto y plazo.",
-    "pinValidado": true,
-    "montoAutorizado": 4000,
-    "nivelAutorizado": "NOBEL",
-    "plazoAutorizado": 16,
-    "tablaCargosIdSugerido": 35,
-    "decisionPayload": {
-      "motivo": "Plan viable segun revision.",
-      "monto_solicitado_original": 4500,
-      "monto_autorizado": 4000,
-      "nivel_original": "NOBEL",
-      "nivel_autorizado": "NOBEL",
-      "plazo_original": 21,
-      "plazo_autorizado": 16,
-      "tabla_cargos_id_sugerido": 35
-    }
-  }'
+  -d '{"decision":"aprobado_con_ajuste","aprobado":true,"userId":"USR001","userName":"Oficina","notas":"Se aprueba con ajuste.","pinValidado":true,"montoAutorizado":4000,"nivelAutorizado":"NOBEL","plazoAutorizado":16,"tablaCargosIdSugerido":35,"decisionPayload":{"monto_autorizado":4000,"nivel_autorizado":"NOBEL","plazo_autorizado":16,"tabla_cargos_id_sugerido":35}}'
 ```
 
 ## Errores comunes
