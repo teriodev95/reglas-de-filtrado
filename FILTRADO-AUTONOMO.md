@@ -250,8 +250,8 @@ Descartar si:
 Si no hay match confiable:
 
 - `c13_persona_id_aval_asignado = false`
-- dejar `c14-c17` sin cerrar
-- usar `requiere_correccion`
+- si la persona no existe en BD, es persona nueva: resolver `c14-c17` como `true` (sin historial = sin conflictos)
+- no usar `requiere_correccion` solo por falta de `persona_id`
 
 ## Regla sobre CURP
 
