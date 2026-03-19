@@ -93,3 +93,21 @@ Usar `requiere_correccion` cuando:
 - **Apellido invertido en captura**: corregible si la persona es claramente la misma.
 - **Nombre completamente diferente al INE**: bloqueante (`c08/c09 = false`).
 - **Domicilio compartido cliente/aval**: bloqueante (`r01 = false`).
+
+---
+
+## 6. Siempre resolver todos los checks
+
+Aunque se encuentre un check bloqueante (ej. `r01 = false` o `c08 = false`), el bot debe **seguir evaluando todos los demas checks**. No dejar ningun check pendiente o en `null` solo porque ya se encontro un hallazgo.
+
+Razon:
+
+- El revisor necesita ver el panorama completo de la solicitud
+- Si solo se muestra el primer hallazgo, el agente corrige ese y al volver a filtrar aparece otro
+- Resolver todo de una vez ahorra ciclos de correccion
+
+Regla:
+
+- recorrer siempre los 26 checks + r01 sin importar si alguno ya fallo
+- `null` solo es aceptable con justificacion tecnica (c06/c07 si no es agua, c23 si no hay historial de liquidaciones)
+- nunca dejar `null` por "ya encontre un bloqueo, no sigo revisando"
