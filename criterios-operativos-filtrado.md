@@ -111,3 +111,35 @@ Regla:
 - recorrer siempre los 26 checks + r01 sin importar si alguno ya fallo
 - `null` solo es aceptable con justificacion tecnica (c06/c07 si no es agua, c23 si no hay historial de liquidaciones)
 - nunca dejar `null` por "ya encontre un bloqueo, no sigo revisando"
+
+---
+
+## 7. Siempre llenar diagnostico, motivo_rechazo y doc_invalido_detalle
+
+Al guardar el filtrado, estos tres campos son obligatorios:
+
+- `diagnostico`: resumen breve del resultado. Siempre se llena. Incluir nivel, monto, hallazgos principales y correcciones aplicadas.
+- `motivo_rechazo`: razon del bloqueo cuando `status_filtrado = requiere_correccion`. Si es `sin_hallazgos`, enviar string vacio `""`.
+- `doc_invalido_detalle`: detalle cuando hay documentos con datos incorrectos (nombre no coincide con INE, CURP no coincide, etc). Si no hay problemas documentales, enviar string vacio `""`.
+
+Importante: la API no acepta `null` en estos campos. Usar `""` cuando no aplica.
+
+Ejemplo sin_hallazgos:
+
+```json
+{
+  "diagnostico": "NUEVO $5000. Personas nuevas, documentos validos. Sin hallazgos.",
+  "motivo_rechazo": "",
+  "doc_invalido_detalle": ""
+}
+```
+
+Ejemplo requiere_correccion:
+
+```json
+{
+  "diagnostico": "NUEVO $5000. c08=false: nombre cliente mal capturado. r01=false: mismo NoServicio.",
+  "motivo_rechazo": "1) Nombre cliente incorrecto: falta apellido GASPARIANO. 2) Cliente y aval comparten NoServicio.",
+  "doc_invalido_detalle": "INE cliente muestra GASPARIANO GONZALEZ RODOLFO EMILIO pero solicitud capturo EMILIO GONZALEZ RODOLFO."
+}
+```
