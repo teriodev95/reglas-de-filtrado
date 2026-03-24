@@ -115,13 +115,72 @@ Reglas minimas:
 - si la solicitud se cierra negativamente: `rechazada`
 - si se cierra por duplicado o baja administrativa: `cancelada`
 
-`status_revision` no controla la ruta. Solo describe el resultado puntual de revision.
+`status_revision` ya no forma parte del modelo vigente. No usarlo ni leerlo.
 
 Regla de cierre:
 
 - si el bot guarda `status_filtrado = sin_hallazgos`, la solicitud debe quedar en `en_vistos_buenos`
 - si el bot guarda `status_filtrado = requiere_correccion`, la solicitud debe quedar en `en_correccion`
 - despues de guardar, volver a leer la solicitud y validar que `status`, `filtrado.status` y `ruta_solicitud` no queden desalineados
+- `diagnostico`, `motivo_rechazo` y `doc_invalido_detalle` nunca deben quedar en `null`
+- cuando no apliquen:
+  - `diagnostico`: usar `sin_hallazgos` o `pendiente_de_diagnostico` segun el caso
+  - `motivo_rechazo`: usar `no_aplica`
+  - `doc_invalido_detalle`: usar `no_aplica`
+
+## Contrato final de filtrado
+
+Guardar el resultado estructurado en:
+
+- `resultado_revision.checks`
+- `resultado_revision.acciones`
+- `resultado_revision.contexto_filtrado`
+- `resultado_revision.meta`
+
+Reglas:
+
+- no usar `detalle`; el nombre vigente es `contexto_filtrado`
+- no usar checks separados para comprobante de agua al corriente
+- el comprobante de domicilio vive en:
+  - `contexto_filtrado.cliente.comprobante_domicilio`
+  - `contexto_filtrado.aval.comprobante_domicilio`
+- ese bloque debe usar:
+  - `tipo_comprobante`
+  - `cumple_recencia`
+  - `cumple_al_corriente`
+  - `numero_contrato`
+  - `numero_servicio`
+  - `fecha_emision_comprobante`
+- cuando un campo estructurado no aplique, usar `no_aplica`
+- no dejar `null` en campos semanticos que el front consuma directamente
+
+Checks contextuales:
+
+- `c12`, `c13`, `c14`, `c15`, `c16`, `c17`, `c23`, `c25`, `c26`
+
+Valores permitidos:
+
+- `si`
+- `no`
+- `no_aplica`
+- `persona_nueva`
+
+Reglas minimas:
+
+- si el diagnostico o la evidencia confirman cliente nuevo, usar:
+  - `c12 = persona_nueva`
+  - `c25 = persona_nueva`
+  - `c26 = persona_nueva`
+  - `contexto_filtrado.cliente.estado_persona = persona_nueva`
+- si el diagnostico o la evidencia confirman aval nuevo, usar:
+  - `c13 = persona_nueva`
+  - `c14 = persona_nueva`
+  - `c15 = persona_nueva`
+  - `c16 = persona_nueva`
+  - `c17 = persona_nueva`
+  - `contexto_filtrado.aval.estado_persona = persona_nueva`
+- si cliente o aval ya existen y el `persona_id` es valido, usar `si`
+- si la regla no corresponde al caso, usar `no_aplica`
 
 ## Toma de solicitud para filtrado
 
@@ -200,7 +259,7 @@ Buscar solicitud:
 curl -X POST 'http://65.21.188.158:7400/run_query' \
   -H 'x-api-key: 9mYS%hyyFGBg#x3ByAu%v@d@' \
   -H 'Content-Type: application/json' \
-  -d '{"query":"SELECT id, agencia, gerencia, cliente_persona_id, aval_persona_id, cliente_no_servicio, aval_no_servicio, status_revision FROM solicitudes WHERE id = '\''{solicitud_id}'\''"}'
+  -d '{"query":"SELECT id, agencia, gerencia, cliente_persona_id, aval_persona_id, cliente_no_servicio, aval_no_servicio, status FROM solicitudes WHERE id = '\''{solicitud_id}'\''"}'
 ```
 
 Buscar candidato de aval:
@@ -249,9 +308,21 @@ Descartar si:
 
 Si no hay match confiable:
 
-- `c13_persona_id_aval_asignado = false`
-- si la persona no existe en BD, es persona nueva: resolver `c14-c17` como `true` (sin historial = sin conflictos)
-- no usar `requiere_correccion` solo por falta de `persona_id`
+- si la evidencia indica aval nuevo:
+  - `c13_persona_id_aval_asignado = persona_nueva`
+  - `c14-c17 = persona_nueva`
+  - no bloquear solo por eso
+- si no hay evidencia suficiente para decidir entre aval nuevo y match fallido:
+  - `c13_persona_id_aval_asignado = no`
+  - dejar `c14-c17` sin cerrar o en `no_aplica` segun corresponda
+  - usar `requiere_correccion`
+
+Si el aval es persona nueva y no existe en BD:
+
+- `c13_persona_id_aval_asignado = persona_nueva`
+- `c14-c17 = persona_nueva`
+- no bloquear solo por eso
+- registrar accion indicando "Persona nueva"
 
 ## Regla sobre CURP
 
@@ -326,7 +397,7 @@ Se puede corregir directamente:
 
 ## Checks del bot
 
-Los checks se guardan como `true`, `false` o `null` planos. No usar objetos.
+Los checks se guardan planos. No usar objetos.
 
 Referencia completa: `matriz-validacion-filtrado-v2.md`
 
@@ -337,8 +408,14 @@ Los `checks` viven en `resultado_filtrado.checks`.
 Reglas minimas:
 
 - llave plana
-- valor solo `true`, `false` o `null`
-- no usar `"true"` o `"false"`
+- por default el valor puede ser `true`, `false` o `null`
+- `c06` y `c07` ya no viven en `checks`
+- Android solo manda `prevalidacion_app.checks.c04/c05`, los documentos y la captura; no manda `contexto_filtrado.comprobante_domicilio`
+- el agente / bot de filtrado debe hidratar `contexto_filtrado.cliente.comprobante_domicilio` y `contexto_filtrado.aval.comprobante_domicilio` usando OCR del comprobante
+- esa hidratacion debe ocurrir durante el filtrado o al tomar la solicitud para filtrado; no debe depender de scripts manuales para solicitudes nuevas
+- el contexto del comprobante vive en `contexto_filtrado.cliente.comprobante_domicilio` y `contexto_filtrado.aval.comprobante_domicilio`
+- `c12`, `c13`, `c14`, `c15`, `c16`, `c17`, `c23`, `c25` y `c26` usan `si`, `no`, `no_aplica` o `persona_nueva`
+- no usar `"true"` o `"false"` para esos checks contextuales
 - no anidar objetos por check
 
 Shape minimo:
@@ -349,7 +426,12 @@ Shape minimo:
     "checks": {
       "c08_nombre_cliente_coincide": true,
       "c09_nombre_aval_coincide": true,
-      "c13_persona_id_aval_asignado": false,
+      "c13_persona_id_aval_asignado": "persona_nueva",
+      "c14_aval_no_fue_cliente_moroso": "persona_nueva",
+      "c15_aval_no_avalo_cliente_moroso": "persona_nueva",
+      "c16_aval_no_avalo_liq_especial": "persona_nueva",
+      "c17_aval_no_activo_otra_agencia": "persona_nueva",
+      "c23_no_liquido_con_descuento_y_sube": "no_aplica",
       "r01_cliente_aval_no_comparten_domicilio": false
     },
     "acciones": [],
@@ -358,17 +440,36 @@ Shape minimo:
       "filtered_by": "bot",
       "filtered_at": "2026-03-14T18:00:00.000Z"
     },
-    "detalle": {
+    "contexto_filtrado": {
       "cliente": {
+        "estado_persona": "persona_existente",
         "persona_id": "J0CP-5933-53QC-de",
-        "score_final": 100
+        "score_final": 100,
+        "comprobante_domicilio": {
+          "tipo_comprobante": "cfe",
+          "cumple_recencia": "si",
+          "cumple_al_corriente": "no_aplica",
+          "numero_contrato": "no_aplica",
+          "numero_servicio": "256130703814",
+          "fecha_emision_comprobante": "2026-03-01"
+        }
       },
-      "aval": { "persona_id": null },
+      "aval": {
+        "estado_persona": "persona_nueva",
+        "fue_cliente": "no",
+        "comprobante_domicilio": {
+          "tipo_comprobante": "agua",
+          "cumple_recencia": "si",
+          "cumple_al_corriente": "si",
+          "numero_contrato": "123456",
+          "numero_servicio": "no_aplica",
+          "fecha_emision_comprobante": "2026-03-05"
+        }
+      },
       "tabla_cargos": {
         "id": 35
       }
-    },
-    "tabla_cargos_id_sugerido": 35
+    }
   }
 }
 ```
@@ -378,7 +479,7 @@ cURL minimo:
 ```bash
 curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/filtrado' \
   -H 'Content-Type: application/json' \
-  -d '{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z","resultado_filtrado":{"checks":{"c08_nombre_cliente_coincide":true,"c09_nombre_aval_coincide":true,"c13_persona_id_aval_asignado":false,"r01_cliente_aval_no_comparten_domicilio":false},"acciones":[],"meta":{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z"},"detalle":{"cliente":{"persona_id":"J0CP-5933-53QC-de","score_final":100},"aval":{"persona_id":null},"tabla_cargos":{"id":35}},"tabla_cargos_id_sugerido":35}}'
+  -d '{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z","resultado_filtrado":{"checks":{"c08_nombre_cliente_coincide":true,"c09_nombre_aval_coincide":true,"c13_persona_id_aval_asignado":"no","c23_no_liquido_con_descuento_y_sube":"no_aplica","r01_cliente_aval_no_comparten_domicilio":false},"acciones":[],"meta":{"status_filtrado":"requiere_correccion","filtered_by":"bot","filtered_at":"2026-03-14T18:00:00.000Z"},"contexto_filtrado":{"cliente":{"estado_persona":"persona_existente","persona_id":"J0CP-5933-53QC-de","score_final":100,"comprobante_domicilio":{"tipo_comprobante":"cfe","cumple_recencia":"si","cumple_al_corriente":"no_aplica","numero_contrato":"no_aplica","numero_servicio":"256130703814","fecha_emision_comprobante":"2026-03-01"}},"aval":{"estado_persona":"persona_no_encontrada"},"tabla_cargos":{"id":35}}}}'
 ```
 
 cURL de visto bueno:
@@ -393,6 +494,7 @@ curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/chec
 
 - mandar `checks` fuera de `resultado_filtrado`
 - mandar `"true"` o `"false"` como texto
+- mandar `true/false/null` en checks contextuales como `c12`, `c13`, `c14-c17`, `c23`, `c25`, `c26`
 - no mandar `filtered_by` ni `filtered_at` al tomar la solicitud
 - mandar `acciones.evidencia` como string en lugar de array
 - mandar `status_filtrado` distinto de:
@@ -414,7 +516,6 @@ curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/chec
 
 ### Pueden ser null con justificacion
 
-- c06, c07 — solo aplica si comprobante es de agua
 - c18, c19, c20 — solo si no se pudo obtener no_servicio corregido
 - c23 — solo si no hay historial de liquidaciones
 
@@ -423,6 +524,7 @@ curl -X PATCH 'https://elysia.xpress1.cc/api/solicitudes-app/{solicitud_id}/chec
 Antes de guardar, el bot debe:
 
 1. Recorrer los 26 checks. Ningun check obligatorio puede quedar `null`.
+2. Hidratar siempre `contexto_filtrado.cliente.comprobante_domicilio` y `contexto_filtrado.aval.comprobante_domicilio` cuando exista comprobante cargado.
 2. Verificar que `evidencia` sea array de strings en cada accion.
 3. Verificar que `detalle` incluya `cliente.persona_id`, `cliente.score_final`, `aval.persona_id` y `tabla_cargos`.
 4. Si algo falta, corregirlo antes de enviar el PATCH.

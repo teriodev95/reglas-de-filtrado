@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "ok": { "type": "boolean" },
+    "solicitud_id": { "type": "string" },
+    "mode": { "type": "string", "enum": ["dry-run", "apply"] },
+    "read_url": { "type": "string" },
+    "patch_url": { "type": "string" },
+    "needs_patch": { "type": "boolean" },
+    "patch_applied": { "type": "boolean" },
+    "verification_ok": { "type": "boolean" },
+    "summary": { "type": "string" },
+    "actions_taken": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "payload_preview": {
+      "type": ["object", "null"]
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": [
+    "ok",
+    "solicitud_id",
+    "mode",
+    "read_url",
+    "patch_url",
+    "needs_patch",
+    "patch_applied",
+    "verification_ok",
+    "summary",
+    "actions_taken",
+    "payload_preview",
+    "notes"
+  ]
+}
