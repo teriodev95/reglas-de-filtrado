@@ -12,6 +12,7 @@ JOB_DIR="/tmp/reglas-filtrado-job-${SOLICITUD_ID}"
 LOG_FILE="${LOG_FILE:-/tmp/reglas-filtrado-runner.log}"
 CENTRIFUGO_API_URL="${CENTRIFUGO_API_URL:-https://centrifugo-api.terio.dev/api/publish}"
 CENTRIFUGO_API_KEY="${CENTRIFUGO_API_KEY:-9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065}"
+RUN_ID="run-$(date +%Y%m%d%H%M%S)-${SOLICITUD_ID}"
 
 log() {
   local message="$1"
@@ -37,6 +38,104 @@ publish_event() {
 {"channel":"solicitud.${SOLICITUD_ID}","data":{"type":"bot.message","solicitud_id":"${SOLICITUD_ID}","stage":"${stage}","status":"${status}","message":"${message}","detail":"${detail}","progress":{"current":${progress_current},"total":${progress_total},"label":"${progress_label}"},"meta":{"filtered_by":"runner","filtered_at":"${now}"},"timestamp":"${now}"}}
 JSON
 )" >/dev/null || true
+}
+
+refresh_solicitud_json() {
+  curl -fsSL "${BASE_URL}/api/solicitudes-app/${SOLICITUD_ID}" -o "$SOLICITUD_JSON"
+}
+
+persist_agent_state() {
+  local stage="$1"
+  local run_status="$2"
+  local message="$3"
+  local detail="$4"
+  local progress_current="${5:-0}"
+  local progress_total="${6:-0}"
+  local progress_label="${7:-Seguimiento del agente}"
+  local payload_file="$JOB_DIR/agent-run-patch.json"
+
+  node - "$SOLICITUD_JSON" "$SOLICITUD_ID" "$RUN_ID" "$MODE" "$stage" "$run_status" "$message" "$detail" "$progress_current" "$progress_total" "$progress_label" > "$payload_file" <<'NODE'
+const fs = require("fs");
+
+const [
+  solicitudJsonPath,
+  solicitudId,
+  runId,
+  mode,
+  stage,
+  runStatus,
+  message,
+  detail,
+  progressCurrent,
+  progressTotal,
+  progressLabel,
+] = process.argv.slice(2);
+
+const now = new Date().toISOString();
+const raw = JSON.parse(fs.readFileSync(solicitudJsonPath, "utf8"));
+const data = raw?.data || raw;
+const filtrado = data?.filtrado && typeof data.filtrado === "object" ? data.filtrado : {};
+const resultado = filtrado?.resultado && typeof filtrado.resultado === "object"
+  ? JSON.parse(JSON.stringify(filtrado.resultado))
+  : {};
+const existingAgentRun = resultado?.agent_run && typeof resultado.agent_run === "object"
+  ? resultado.agent_run
+  : {};
+const existingEvents = Array.isArray(existingAgentRun.events) ? existingAgentRun.events : [];
+
+const event = {
+  type: "bot.message",
+  solicitud_id: solicitudId,
+  stage,
+  status: runStatus,
+  message,
+  detail: detail || null,
+  progress: {
+    current: Number(progressCurrent) || 0,
+    total: Number(progressTotal) || 0,
+    label: progressLabel || "Seguimiento del agente",
+  },
+  meta: {
+    filtered_by: filtrado.filtered_by || "runner",
+    filtered_at: filtrado.filtered_at || now,
+  },
+  timestamp: now,
+};
+
+const dedupedEvents = [event, ...existingEvents].filter((current, index, array) => {
+  const key = `${current.timestamp}:${current.stage}:${current.status}:${current.message}`;
+  return array.findIndex((candidate) => `${candidate.timestamp}:${candidate.stage}:${candidate.status}:${candidate.message}` === key) === index;
+}).slice(0, 25);
+
+resultado.agent_run = {
+  run_id: existingAgentRun.run_id || runId,
+  mode,
+  status: runStatus,
+  started_at: existingAgentRun.started_at || now,
+  finished_at: runStatus === "done" || runStatus === "failed" || runStatus === "cancelled" ? now : null,
+  current_stage: stage,
+  current_message: message,
+  events: dedupedEvents,
+};
+
+const payload = {
+  status_filtrado: filtrado.status || "pendiente",
+  filtered_by: filtrado.filtered_by || "runner",
+  filtered_at: filtrado.filtered_at || now,
+  diagnostico: filtrado.diagnostico || undefined,
+  motivo_rechazo: filtrado.motivo_rechazo || "no_aplica",
+  doc_invalido_detalle: filtrado.doc_invalido_detalle || "no_aplica",
+  resultado_filtrado: resultado,
+};
+
+process.stdout.write(JSON.stringify(payload));
+NODE
+
+  curl -fsSL -X PATCH "${BASE_URL}/api/solicitudes-app/${SOLICITUD_ID}/filtrado" \
+    -H 'Content-Type: application/json' \
+    --data-binary @"$payload_file" >/dev/null || true
+
+  refresh_solicitud_json || true
 }
 
 if [[ -z "$SOLICITUD_ID" ]]; then
@@ -77,7 +176,8 @@ trap cleanup EXIT
 
 SOLICITUD_JSON="$JOB_DIR/solicitud.json"
 log "download_solicitud"
-curl -fsSL "${BASE_URL}/api/solicitudes-app/${SOLICITUD_ID}" -o "$SOLICITUD_JSON"
+refresh_solicitud_json
+persist_agent_state "runner_iniciado" "running" "Se inició la revisión automática" "El sistema está preparando la solicitud y descargando los documentos necesarios." 1 4 "Preparar solicitud"
 
 readarray -t URLS < <(node -e '
 const fs = require("fs");
@@ -107,6 +207,7 @@ if [[ -n "$AVAL_URL" ]]; then
 fi
 
 publish_event "runner_contexto_listo" "en_filtrado" "Documentos listos para revisión" "La solicitud y los comprobantes disponibles ya fueron preparados para el agente." 2 4 "Preparar documentos"
+persist_agent_state "runner_contexto_listo" "running" "Documentos listos para revisión" "La solicitud y los comprobantes disponibles ya fueron preparados para el agente." 2 4 "Preparar documentos"
 
 cat > "$PROMPT_FILE" <<PROMPT
 Trabaja solo sobre una solicitud: ${SOLICITUD_ID}
@@ -129,6 +230,11 @@ Objetivo:
 - Usar la solicitud JSON local ya descargada y las imagenes locales de comprobante cuando existan.
 - Puedes usar curl contra Elysia y contra Centrifugo.
 - Emitir progreso por Centrifugo siguiendo la seccion "Notificaciones del bot" de FILTRADO-AUTONOMO.md.
+- Debes publicar al menos estos pasos intermedios por Centrifugo si la corrida continua:
+  - \`reglas_cargadas\`
+  - \`solicitud_leida\`
+  - \`documentos_revisados\`
+  - \`payload_validado\`
 - En dry-run no debes modificar nada.
 - En apply puedes hacer PATCH solo si el payload cumple el contrato vigente.
 
@@ -176,6 +282,10 @@ PROMPT
 
 cd "$WORKDIR"
 log "claude_started"
+publish_event "analisis_en_curso" "en_filtrado" "El agente está revisando la solicitud" "Se están evaluando las reglas, el contexto y los comprobantes disponibles." 3 4 "Revisar reglas y documentos"
+persist_agent_state "analisis_en_curso" "running" "El agente está revisando la solicitud" "Se están evaluando las reglas, el contexto y los comprobantes disponibles." 3 4 "Revisar reglas y documentos"
+
+set +e
 RESULT_JSON="$("$CLAUDE_BIN" -p \
   --add-dir "$WORKDIR" "$JOB_DIR" \
   --allowedTools Bash Read \
@@ -192,6 +302,18 @@ process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(output));
 });
 ' )"
+CLAUDE_EXIT=$?
+set -e
 
 log "claude_finished"
+if [[ "$CLAUDE_EXIT" -ne 0 ]]; then
+  publish_event "runner_fallido" "failed" "La revisión automática terminó con un problema" "Claude no pudo completar la corrida. Revisa el log del runner para más detalle." 4 4 "Finalizar revisión"
+  persist_agent_state "runner_fallido" "failed" "La revisión automática terminó con un problema" "Claude no pudo completar la corrida. Revisa el log del runner para más detalle." 4 4 "Finalizar revisión"
+  echo '{"ok":false,"error":"claude_failed"}'
+  exit 4
+fi
+
+FINAL_SUMMARY="$(node -e 'const raw = JSON.parse(process.argv[1]); process.stdout.write(String(raw.summary || "La revisión terminó."));' "$RESULT_JSON")"
+publish_event "runner_finalizado" "done" "La revisión automática terminó" "$FINAL_SUMMARY" 4 4 "Finalizar revisión"
+persist_agent_state "runner_finalizado" "done" "$FINAL_SUMMARY" "La última actualización quedó guardada en la solicitud." 4 4 "Finalizar revisión"
 echo "$RESULT_JSON"
