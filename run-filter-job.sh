@@ -9,6 +9,35 @@ LOCK_FILE="${LOCK_FILE:-/tmp/reglas-filtrado.lock}"
 CLAUDE_BIN="${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 SCHEMA_FILE="$WORKDIR/filter-job-schema.json"
 JOB_DIR="/tmp/reglas-filtrado-job-${SOLICITUD_ID}"
+LOG_FILE="${LOG_FILE:-/tmp/reglas-filtrado-runner.log}"
+CENTRIFUGO_API_URL="${CENTRIFUGO_API_URL:-https://centrifugo-api.terio.dev/api/publish}"
+CENTRIFUGO_API_KEY="${CENTRIFUGO_API_KEY:-9583814acd2717ed9e0b283c6bd904d495dff0b2cd687e6ebeaafe70fc9b3065}"
+
+log() {
+  local message="$1"
+  printf '[%s] solicitud=%s mode=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SOLICITUD_ID" "$MODE" "$message" | tee -a "$LOG_FILE" >&2
+}
+
+publish_event() {
+  local stage="$1"
+  local status="$2"
+  local message="$3"
+  local detail="$4"
+  local progress_current="${5:-0}"
+  local progress_total="${6:-0}"
+  local progress_label="${7:-Seguimiento del agente}"
+
+  local now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  curl -sS -X POST "$CENTRIFUGO_API_URL" \
+    -H 'Content-Type: application/json' \
+    -H "X-API-Key: $CENTRIFUGO_API_KEY" \
+    -d "$(cat <<JSON
+{"channel":"solicitud.${SOLICITUD_ID}","data":{"type":"bot.message","solicitud_id":"${SOLICITUD_ID}","stage":"${stage}","status":"${status}","message":"${message}","detail":"${detail}","progress":{"current":${progress_current},"total":${progress_total},"label":"${progress_label}"},"meta":{"filtered_by":"runner","filtered_at":"${now}"},"timestamp":"${now}"}}
+JSON
+)" >/dev/null || true
+}
 
 if [[ -z "$SOLICITUD_ID" ]]; then
   echo '{"ok":false,"error":"missing_solicitud_id"}'
@@ -27,9 +56,14 @@ fi
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
+  log "busy_lock"
+  publish_event "runner_ocupado" "en_filtrado" "Ya hay una revisión en curso" "El worker sigue ocupado con otra solicitud. Espera a que termine." 0 1 "Esperando turno"
   echo '{"ok":false,"error":"busy","message":"another filter job is running"}'
   exit 3
 fi
+
+log "runner_started"
+publish_event "runner_iniciado" "en_filtrado" "Se inició la revisión automática" "El sistema está preparando la solicitud y descargando los documentos necesarios." 1 4 "Preparar solicitud"
 
 mkdir -p /tmp
 rm -rf "$JOB_DIR"
@@ -42,6 +76,7 @@ cleanup() {
 trap cleanup EXIT
 
 SOLICITUD_JSON="$JOB_DIR/solicitud.json"
+log "download_solicitud"
 curl -fsSL "${BASE_URL}/api/solicitudes-app/${SOLICITUD_ID}" -o "$SOLICITUD_JSON"
 
 readarray -t URLS < <(node -e '
@@ -61,13 +96,17 @@ AVAL_IMG=""
 
 if [[ -n "$CLIENTE_URL" ]]; then
   CLIENTE_IMG="$JOB_DIR/comprobante_domicilio_cliente.jpg"
+  log "download_cliente_comprobante"
   curl -fsSL "$CLIENTE_URL" -o "$CLIENTE_IMG" || CLIENTE_IMG=""
 fi
 
 if [[ -n "$AVAL_URL" ]]; then
   AVAL_IMG="$JOB_DIR/comprobante_domicilio_aval.jpg"
+  log "download_aval_comprobante"
   curl -fsSL "$AVAL_URL" -o "$AVAL_IMG" || AVAL_IMG=""
 fi
+
+publish_event "runner_contexto_listo" "en_filtrado" "Documentos listos para revisión" "La solicitud y los comprobantes disponibles ya fueron preparados para el agente." 2 4 "Preparar documentos"
 
 cat > "$PROMPT_FILE" <<PROMPT
 Trabaja solo sobre una solicitud: ${SOLICITUD_ID}
@@ -136,7 +175,8 @@ Devuelve JSON con esta forma:
 PROMPT
 
 cd "$WORKDIR"
-"$CLAUDE_BIN" -p \
+log "claude_started"
+RESULT_JSON="$("$CLAUDE_BIN" -p \
   --add-dir "$WORKDIR" "$JOB_DIR" \
   --allowedTools Bash Read \
   --permission-mode dontAsk \
@@ -151,4 +191,7 @@ process.stdin.on("end", () => {
   const output = parsed?.structured_output ?? parsed;
   process.stdout.write(JSON.stringify(output));
 });
-'
+' )"
+
+log "claude_finished"
+echo "$RESULT_JSON"
