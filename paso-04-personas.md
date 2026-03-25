@@ -6,19 +6,78 @@ El flujo es **secuencial condicional**: primero cliente, luego aval, luego domic
 
 ---
 
-## 4A — Cliente: ¿existe en BD?
+## Busqueda de persona — regla general
 
-Buscar por CURP (usando el valor corregido del paso 3). Si no hay resultado, buscar por nombre + telefono.
+La misma logica aplica para cliente (4A) y aval (4B).
+
+### 1. Intentar por CURP (principal)
 
 ```sql
--- Por CURP
-SELECT id FROM personas WHERE curp = '{curp_corregida}'
+SELECT id, nombres, apellido_paterno, apellido_materno, curp, telefono
+FROM personas WHERE curp = '{curp_corregida}'
+```
 
--- Por nombre + telefono (fallback)
-SELECT id FROM personas
-WHERE UPPER(CONCAT(nombres,' ',apellido_paterno,' ',apellido_materno)) LIKE '%{nombre}%'
+La CURP usada es la **corregida en el paso 3** (OCR del INE tiene prioridad sobre lo capturado).
+
+> Muchos registros aun no tienen CURP en BD. Si el resultado es vacio, pasar al paso 2.
+
+### 2. Fallback por nombres (si no hay CURP o no hay match)
+
+El OCR y la INE a veces entregan los nombres en orden distinto al que esta en BD:
+
+| Caso | Orden leido |
+|---|---|
+| BD (captura) | `nombres` + `apellido_paterno` + `apellido_materno` |
+| OCR / INE frecuente | `apellido_paterno` + `apellido_materno` + `nombres` |
+
+**Antes de buscar, normalizar el nombre extraido por OCR:**
+
+1. Tomar la cadena completa del INE (ej. `FLORES CORONA SANDRA`)
+2. Intentar separar en los tres campos probando ambos ordenes
+3. Construir las dos variantes y buscar ambas en BD
+
+```sql
+-- Buscar por nombre completo normalizado (ambas variantes)
+SELECT id, nombres, apellido_paterno, apellido_materno, curp, telefono
+FROM personas
+WHERE (
+  UPPER(CONCAT(nombres,' ',apellido_paterno,' ',apellido_materno))
+    LIKE '%{variante_A}%'
+  OR
+  UPPER(CONCAT(nombres,' ',apellido_paterno,' ',apellido_materno))
+    LIKE '%{variante_B}%'
+)
 LIMIT 20
 ```
+
+**Ejemplo:**
+- OCR lee: `FLORES CORONA SANDRA`
+- Variante A (OCR tal cual): buscar `FLORES CORONA SANDRA`
+- Variante B (invertido): buscar `SANDRA FLORES CORONA`
+- BD tiene: `nombres=SANDRA`, `ap_pat=FLORES`, `ap_mat=CORONA` → coincide con variante B
+
+### 3. Criterios para aceptar el candidato
+
+Aceptar solo si se cumple al menos uno de:
+
+- CURP coincide (aunque sea parcial, validar con el resto de datos)
+- Nombre completo coincide fuertemente en cualquiera de los dos ordenes
+- Telefono coincide o hay relacion historica compatible
+
+Descartar si:
+- Nombre completamente distinto sin explicacion
+- Telefono distinto sin justificacion y sin historial relacionado
+- Aparece en otra gerencia sin relacion historica con el cliente actual
+
+### 4. Duplicados
+
+Si hay 2 o mas registros con la misma CURP, usar el de `created_at` mas temprano.
+
+---
+
+## 4A — Cliente: ¿existe en BD?
+
+Aplicar la busqueda anterior con los datos del **cliente**. Usar CURP corregida del paso 3.
 
 Si hay duplicados con la misma CURP, usar el registro con `created_at` mas temprano.
 
@@ -78,7 +137,8 @@ Continuar a **4B — Aval**.
 
 ## 4B — Aval: ¿existe en BD?
 
-Misma busqueda: CURP corregida → fallback nombre + telefono.
+Aplicar la misma logica de busqueda descrita arriba con los datos del **aval**.
+CURP corregida del paso 3 → fallback por nombres normalizando el orden (OCR del INE del aval puede traer apellidos primero).
 
 ### Rama A: Aval = persona nueva
 
