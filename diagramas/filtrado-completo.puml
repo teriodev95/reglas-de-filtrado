@@ -1,0 +1,284 @@
+@startuml filtrado-completo
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 10
+skinparam ArrowColor #1E50A0
+skinparam ArrowThickness 1.5
+
+skinparam activity {
+  BackgroundColor #E8EEF8
+  BorderColor #1E50A0
+  FontColor #111111
+  DiamondBackgroundColor #FFF3CD
+  DiamondBorderColor #C07000
+  DiamondFontColor #111111
+  StartColor #1E50A0
+  EndColor #B03020
+}
+
+skinparam note {
+  BackgroundColor #F5F7FF
+  BorderColor #99AACC
+  FontSize 9
+}
+
+skinparam partition {
+  BackgroundColor #F8F9FF
+  BorderColor #99AACC
+  FontColor #1E50A0
+  FontStyle bold
+}
+
+title Filtrado Autónomo — Flujo Completo con Reglas
+
+start
+
+' ═══════════════════════════════════════════════
+partition "**1. Tomar solicitud**" {
+  #E8EEF8:GET solicitud · PATCH filtered_by = bot, filtered_at = now;
+  note right
+    Verificar antes de tomar:
+    · filtered_by ya tiene valor → no reprocesar
+    · agencia / gerencia / semana en null → alertar
+    · teléfonos placeholder → alertar
+  end note
+}
+
+' ═══════════════════════════════════════════════
+partition "**2. OCR — 4 documentos en paralelo**" {
+  #E8EEF8:INE cliente · INE aval\nComprobante cliente · Comprobante aval;
+  note right
+    Extraer por documento:
+    · INE: nombre, CURP, vigencia, domicilio
+    · Comprobante: no_servicio / contrato,
+      fecha_emision, titular, dirección
+    · Recencia comprobante ≤ 3 meses
+  end note
+}
+
+' ═══════════════════════════════════════════════
+partition "**3. Correcciones — OCR vs Captura**" {
+  #E8EEF8:Contrastar OCR contra lo capturado;
+  note right
+    **Si OCR detecta inconsistencia → corregir directo:**
+    · CURP distinta al INE → corregir con INE
+    · NoServicio con dígitos extra/transpuestos → corregir
+    · Nombres en orden incorrecto → corregir
+    · Domicilio del aval copiado del cliente → corregir con comprobante
+    ——
+    **Registrar acción con estado = "aplicada"**
+    ——
+    Bloqueante (no corregible):
+    · Nombre completamente distinto al INE → c08/c09 = false
+    · CURP inválida o datos distintos → c10/c11 = false
+  end note
+
+  ' ── r01: BLOQUEO INMEDIATO ───────────────────
+  if (r01 — ¿Cliente y aval\ncomparten domicilio?) then (SÍ\nMismo NS o comprobante idéntico)
+    #FDDCDC:**BLOQUEO INMEDIATO**\nr01 = false;
+    #FDDCDC:PATCH requiere_correccion\nFIN DEL FLUJO;
+    stop
+  else (NO — domicilios distintos)
+    #D4EDDA:r01 = true;
+  endif
+}
+
+' ═══════════════════════════════════════════════
+partition "**4A. Cliente — ¿existe en BD?**" {
+  #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + teléfono;
+  note right
+    Duplicados: usar created_at más temprano
+  end note
+
+  if (¿Cliente existe en BD?) then (NO — persona nueva)
+    #FFF3CD:**c12 = persona_nueva**;
+    note right
+      Resolución automática:
+      c21 = no_aplica  (sin préstamo previo)
+      c22 = no_aplica  (nivel NUEVO, sin historial)
+      c23 = no_aplica  (sin historial liquidaciones)
+      c24 = no_aplica  (sin semana previa)
+      c25 = persona_nueva
+      c26 = persona_nueva
+    end note
+
+  else (SÍ — identificado)
+    #D4EDDA:**c12 = "si"** · persona_id asignado;
+    #E8EEF8:GET /api/filtrado-clientes/historial/{persona_id}\nscore_final · lista préstamos · acumulado_puntual;
+
+    if (¿Nivel de solicitud\ncorresponde al historial?) then (NO)
+      #FDDCDC:c22 = false · hallazgo: nivel inválido;
+      note right
+        NUEVO=sin historial
+        NOBEL=1+score≥80
+        VIP=2 · PREMIUM=3
+        LEAL=4 · DIAMANTE=4+acum≥$50K
+      end note
+    else (SÍ)
+      #D4EDDA:c22 = true;
+    endif
+
+    if (¿score_final cumple\npara el nivel?) then (NO)
+      #FDDCDC:c25 = "no" · hallazgo: score insuficiente;
+    else (SÍ)
+      #D4EDDA:c25 = "si";
+    endif
+
+    if (¿monto actual − último\npréstamo > $2,000?) then (SÍ)
+      #FDDCDC:c21 = false · hallazgo: aumento excede $2,000;
+    else (NO)
+      #D4EDDA:c21 = true;
+    endif
+
+    if (¿semana solicitud respeta\ncierre del último crédito?) then (NO)
+      #FDDCDC:c24 = false · hallazgo: semana no respetada;
+    else (SÍ)
+      #D4EDDA:c24 = true;
+    endif
+
+    #E8EEF8:MCP liquidaciones\nWHERE persona_id = cliente\nAND tipo_liquidacion = 'especial';
+    if (¿tiene liquidación\nespecial previa?) then (SÍ)
+      #FDDCDC:c26 = "no" · hallazgo: liq. especial detectada;
+      if (¿c26 = "no" Y el nivel\nsolicitado sube?) then (SÍ)
+        #FDDCDC:c23 = "no" · hallazgo: liquidó con descuento y sube;
+      else (NO)
+        #D4EDDA:c23 = "no_aplica";
+      endif
+    else (NO)
+      #D4EDDA:c26 = "si";
+      #D4EDDA:c23 = "si";
+    endif
+  endif
+}
+
+' ═══════════════════════════════════════════════
+partition "**4B. Aval — ¿existe en BD?**" {
+  #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + teléfono;
+
+  if (¿Aval existe en BD?) then (NO — persona nueva)
+    #FFF3CD:**c13 = persona_nueva**;
+    note right
+      Resolución automática:
+      c14 = persona_nueva
+      c15 = persona_nueva
+      c16 = persona_nueva
+      c17 = persona_nueva
+    end note
+
+  else (SÍ — identificado)
+    #D4EDDA:**c13 = "si"** · persona_id asignado;
+    #E8EEF8:GET /api/filtrado-clientes/historial/{persona_id}\nhistorial como cliente + como avalador;
+
+    if (¿aval tiene préstamos\ncon saldo pendiente o mora?) then (SÍ)
+      #FDDCDC:c14 = "no" · hallazgo: aval fue cliente moroso;
+    else (NO)
+      #D4EDDA:c14 = "si";
+    endif
+
+    #E8EEF8:MCP prestamos_v2\nWHERE aval_persona_id = aval\nAND cliente tiene saldo pendiente;
+    if (¿avaló a alguien\nque resultó moroso?) then (SÍ)
+      #FDDCDC:c15 = "no" · hallazgo: avaló a cliente moroso;
+    else (NO)
+      #D4EDDA:c15 = "si";
+    endif
+
+    #E8EEF8:MCP liquidaciones\nWHERE persona_id = aval\nAND tipo_liquidacion = 'especial';
+    if (¿el préstamo que avaló\nterminó en liq. especial?) then (SÍ)
+      #FDDCDC:c16 = "no" · hallazgo: liq. especial como avalado;
+    else (NO)
+      #D4EDDA:c16 = "si";
+    endif
+
+    #E8EEF8:MCP prestamos_v2\nWHERE persona_id = aval\nAND Gerencia != gerencia_solicitud\nAND Saldo > 0;
+    if (¿aval activo en\notra agencia?) then (SÍ)
+      #FDDCDC:c17 = "no" · hallazgo: aval activo en otra agencia;
+      note right
+        GERGC = Capital Xpress
+        GERD  = Dinero Xpress
+        GERDC = Dec Xpress
+        GERE  = Efectivo Xpress
+      end note
+    else (NO)
+      #D4EDDA:c17 = "si";
+    endif
+  endif
+}
+
+' ═══════════════════════════════════════════════
+partition "**4C. Domicilio — c18, c19, c20**" {
+  #E8EEF8:MCP prestamos_v2\nWHERE NoServicio = '{no_servicio_corregido}';
+  note right
+    Si no hay NS corregido →
+    c18 / c19 / c20 = null
+    (no bloquean por sí solos)
+  end note
+
+  if (¿total clientes activos\nen domicilio > 3?) then (SÍ)
+    #FDDCDC:c18 = false · hallazgo: domicilio excede 3 clientes;
+  else (NO)
+    #D4EDDA:c18 = true;
+  endif
+
+  if (¿saldo_total + monto_nuevo\n> límite?) then (SÍ)
+    #FDDCDC:c19 = false · hallazgo: monto domicilio excedido;
+    note right
+      Límite: $30,000
+      Diamante: $40,000
+    end note
+  else (NO)
+    #D4EDDA:c19 = true;
+  endif
+
+  if (¿gerencia del domicilio\ndistinta a la solicitud?) then (SÍ)
+    #FDDCDC:c20 = false · hallazgo: cruce de agencia en domicilio;
+  else (NO)
+    #D4EDDA:c20 = true;
+  endif
+}
+
+' ═══════════════════════════════════════════════
+partition "**4D. Regla complementaria (si aplica)**" {
+  if (¿Solicitud por política\ncréditos a avales?) then (SÍ)
+    #E8EEF8:Ubicar celda: nivel × rango_monto × plazo\nen tabla de autorización;
+    if (¿Celda = N/A?) then (SÍ)
+      #FDDCDC:No procede\ncombinación no autorizada;
+    else (tiene valor)
+      if (semanas_pagadas >=\nsemanas_requeridas?) then (SÍ)
+        #D4EDDA:Procede · cumple = true;
+      else (NO)
+        #FDDCDC:No procede · cumple = false;
+      endif
+    endif
+  else (NO aplica)
+  endif
+}
+
+' ═══════════════════════════════════════════════
+partition "**5–7. Resultado, Guardar y Verificar**" {
+  #E8EEF8:Acumular todos los hallazgos\nde los checks evaluados;
+  note right
+    Resolver TODOS aunque ya haya un bloqueo.
+    El revisor necesita el panorama completo.
+  end note
+
+  if (¿Algún check bloqueante\n= false o "no"?) then (SÍ)
+    #FDDCDC:**requiere_correccion**\nstatus → en_correccion;
+  else (NO)
+    #D4EDDA:**sin_hallazgos**\nstatus → en_vistos_buenos;
+  endif
+
+  #E8EEF8:**PATCH /filtrado**\nstatus_filtrado · checks · acciones\ncontexto_filtrado · diagnostico\nmotivo_rechazo · doc_invalido_detalle;
+  note right
+    diagnostico, motivo_rechazo y
+    doc_invalido_detalle siempre
+    se llenan — nunca null.
+    Usar "no_aplica" cuando no aplican.
+  end note
+
+  #E8EEF8:**GET verificación**\nConfirmar status · contexto_filtrado hidratado\nCentrifugo cierre;
+}
+
+stop
+
+@enduml
