@@ -61,17 +61,29 @@ partition "**2. OCR — 4 documentos en paralelo**" {
 partition "**3. Correcciones — OCR vs Captura**" {
   #E8EEF8:Contrastar OCR contra lo capturado;
   note right
-    **Si OCR detecta inconsistencia → corregir directo:**
+    **Actores:**
+    · Bot de filtrado → detecta la inconsistencia
+    · Agente de IA → aplica la corrección directo en BD
+    ——
+    **Si OCR detecta discrepancia corregible:**
+    · Agente de IA ejecuta PATCH /solicitudes/{id}
+      con el valor corregido
+    · Registra acción: tipo=correccion, actor=agente_ia,
+      estado=aplicada, valor_original, valor_corregido
+    · El flujo continúa con los datos ya corregidos
+    ——
+    **Casos corregibles:**
     · CURP distinta al INE → corregir con INE
     · NoServicio con dígitos extra/transpuestos → corregir
-    · Nombres en orden incorrecto → corregir
-    · Domicilio del aval copiado del cliente → corregir con comprobante
+    · Nombres en campos invertidos → corregir
+    · Domicilio del aval copiado del cliente → corregir
     ——
-    **Registrar acción con estado = "aplicada"**
+    **Si imagen no permite confirmar:**
+    · estado = "sugerida" — no se modifica BD
     ——
-    Bloqueante (no corregible):
+    **Bloqueante (no corregible):**
     · Nombre completamente distinto al INE → c08/c09 = false
-    · CURP inválida o datos distintos → c10/c11 = false
+    · CURP inválida o datos completamente distintos → c10/c11 = false
   end note
 
   ' ── r01: BLOQUEO INMEDIATO ───────────────────
@@ -86,9 +98,18 @@ partition "**3. Correcciones — OCR vs Captura**" {
 
 ' ═══════════════════════════════════════════════
 partition "**4A. Cliente — ¿existe en BD?**" {
-  #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + teléfono;
+  #E8EEF8:Buscar por CURP corregida (paso 3);
   note right
-    Duplicados: usar created_at más temprano
+    **1. Buscar por CURP corregida:**
+    SELECT … FROM personas WHERE curp = '{curp_corregida}'
+    ——
+    **2. Fallback por nombres (si no hay CURP o no hay match):**
+    OCR/INE a veces trae: APELLIDO_PAT APELLIDO_MAT NOMBRE
+    BD almacena: NOMBRE APELLIDO_PAT APELLIDO_MAT
+    → Construir variante A (orden OCR) y variante B (invertido)
+    → Buscar ambas con LIKE en CONCAT(nombres, ap_pat, ap_mat)
+    ——
+    **Duplicados:** usar created_at más temprano
   end note
 
   if (¿Cliente existe en BD?) then (NO — persona nueva)
@@ -101,6 +122,7 @@ partition "**4A. Cliente — ¿existe en BD?**" {
       c24 = no_aplica  (sin semana previa)
       c25 = persona_nueva
       c26 = persona_nueva
+      fue_aval = false (omitir 4D)
     end note
 
   else (SÍ — identificado)
@@ -149,12 +171,31 @@ partition "**4A. Cliente — ¿existe en BD?**" {
       #D4EDDA:c26 = "si";
       #D4EDDA:c23 = "si";
     endif
+
+    ' ── ¿Fue aval de alguien? ────────────────
+    #E8EEF8:MCP prestamos_v2\nWHERE aval_persona_id = {persona_id_cliente}\nORDER BY FechaInicio DESC LIMIT 5;
+    note right
+      Detectar si el solicitante fue aval
+      en algún préstamo anterior.
+      Guardar: nivel, monto, plazo (semanas),
+      semanas_pagadas del préstamo más reciente.
+    end note
+    if (¿Aparece como aval\nen préstamos anteriores?) then (SÍ)
+      #FFF3CD:fue_aval = true\nGuardar datos del préstamo más reciente;
+    else (NO)
+      #E8EEF8:fue_aval = false\nomitir 4D;
+    endif
   endif
 }
 
 ' ═══════════════════════════════════════════════
 partition "**4B. Aval — ¿existe en BD?**" {
-  #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + teléfono;
+  #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + normalización de orden;
+  note right
+    Misma lógica que 4A:
+    1. CURP corregida del paso 3
+    2. Fallback nombres: variante A (OCR) + variante B (invertido)
+  end note
 
   if (¿Aval existe en BD?) then (NO — persona nueva)
     #FFF3CD:**c13 = persona_nueva**;
@@ -239,18 +280,23 @@ partition "**4C. Domicilio — c18, c19, c20**" {
 
 ' ═══════════════════════════════════════════════
 partition "**4D. Regla complementaria (si aplica)**" {
-  if (¿Solicitud por política\ncréditos a avales?) then (SÍ)
-    #E8EEF8:Ubicar celda: nivel × rango_monto × plazo\nen tabla de autorización;
-    if (¿Celda = N/A?) then (SÍ)
-      #FDDCDC:No procede\ncombinación no autorizada;
-    else (tiene valor)
+  if (¿fue_aval = true?) then (SÍ — activar regla)
+    #E8EEF8:Usar datos del préstamo en que fue aval:\nnivel × rango_monto × plazo en semanas;
+    note right
+      Rangos monto: $2K-$4.9K / $5K-$7.9K /
+      $8K-$9.9K / $10K-$11.9K / $12K-$20K
+      Plazos: 16 / 21 / 26 semanas
+    end note
+    if (¿La celda es N/A?) then (SÍ)
+      #FDDCDC:cumple = false\nmotivo: combinación no permitida;
+    else (tiene valor numérico)
       if (semanas_pagadas >=\nsemanas_requeridas?) then (SÍ)
-        #D4EDDA:Procede · cumple = true;
+        #D4EDDA:cumple = true\nProcede el crédito;
       else (NO)
-        #FDDCDC:No procede · cumple = false;
+        #FDDCDC:cumple = false\nmotivo: no alcanza semanas mínimas;
       endif
     endif
-  else (NO aplica)
+  else (NO — omitir)
   endif
 }
 

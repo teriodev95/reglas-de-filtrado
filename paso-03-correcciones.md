@@ -2,6 +2,26 @@
 
 Contrastar lo leido por OCR contra lo capturado. Corregir directamente cuando hay evidencia clara.
 
+## Actores
+
+| Actor | Rol |
+|---|---|
+| **Bot de filtrado** | Ejecuta el OCR y detecta la inconsistencia |
+| **Agente de IA** | Tiene facultad para aplicar la corrección directamente en el registro de la solicitud en BD |
+
+Cuando el OCR detecta una discrepancia corregible, el agente de IA ejecuta un PATCH inmediato sobre la solicitud con el valor corregido. El flujo continúa usando ya los datos corregidos. No es una sugerencia — es una corrección aplicada.
+
+```
+PATCH /api/solicitudes/{solicitud_id}
+{
+  "campo_corregido": "valor_corregido"
+}
+```
+
+La corrección se registra también como acción en el arreglo `acciones` de la solicitud (formato descrito abajo), con `estado = "aplicada"` y la evidencia del documento que la respalda.
+
+---
+
 ## Que se puede corregir
 
 | Campo | Cuando corregir |
@@ -25,10 +45,15 @@ Contrastar lo leido por OCR contra lo capturado. Corregir directamente cuando ha
 
 ## Formato de accion
 
+Cada corrección genera una entrada en el arreglo `acciones` de la solicitud:
+
 ```json
 {
   "tipo": "correccion",
+  "actor": "agente_ia",
   "campo": "aval.no_servicio",
+  "valor_original": "2561307038184",
+  "valor_corregido": "256200308144",
   "estado": "aplicada",
   "detalle": "Corregido de 2561307038184 a 256200308144. Comprobante CFE confirma el valor correcto.",
   "evidencia": ["Comprobante CFE: NO DE SERVICIO 256200308144"],
@@ -36,8 +61,9 @@ Contrastar lo leido por OCR contra lo capturado. Corregir directamente cuando ha
 }
 ```
 
-- `estado: "aplicada"` cuando el OCR confirma con claridad
-- `estado: "sugerida"` solo cuando la imagen no permite confirmar con certeza
+- `actor: "agente_ia"` — siempre que la corrección la aplica el agente
+- `estado: "aplicada"` — OCR confirma con claridad → el agente hizo el PATCH
+- `estado: "sugerida"` — imagen no permite confirmar → no se modifica el registro, se deja para revisión humana
 
 ## Si no hay correcciones
 
