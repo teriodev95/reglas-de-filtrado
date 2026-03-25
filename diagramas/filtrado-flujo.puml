@@ -1,0 +1,144 @@
+@startuml filtrado-flujo
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #1E50A0
+skinparam ArrowThickness 1.5
+
+skinparam activity {
+  BackgroundColor #E8EEF8
+  BorderColor #1E50A0
+  FontColor #111111
+  DiamondBackgroundColor #FFF3CD
+  DiamondBorderColor #C07000
+  DiamondFontColor #111111
+  StartColor #1E50A0
+  EndColor #B03020
+}
+
+skinparam note {
+  BackgroundColor #F5F7FF
+  BorderColor #99AACC
+  FontSize 10
+}
+
+title Filtrado Autónomo — Flujo Simplificado
+
+start
+
+' ── PASO 1 ──────────────────────────────────
+#E8EEF8:**1. Tomar solicitud**\nGET → PATCH filtered_by + filtered_at;
+
+' ── PASO 2 ──────────────────────────────────
+#E8EEF8:**2. OCR — 4 documentos en paralelo**\nINE cliente · INE aval\nComprobante cliente · Comprobante aval;
+note right
+  Extraer:
+  · nombre, CURP, vigencia (INE)
+  · no_servicio, fecha_emision (comprobante)
+  · Recencia ≤ 3 meses
+end note
+
+' ── PASO 3 ──────────────────────────────────
+#E8EEF8:**3. Correcciones**\nContrastar OCR vs captura\nCorregir CURP · NS · nombres · domicilio;
+
+' ── BLOQUEO INMEDIATO: DOMICILIO ────────────
+if (r01 — ¿Cliente y aval\ncomparten domicilio?) then (SÍ — mismo NS o comprobante idéntico)
+  #FDDCDC:**BLOQUEO INMEDIATO**\nr01 = false;
+  #FDDCDC:status_filtrado = requiere_correccion\nFIN DEL FLUJO;
+  stop
+else (NO — domicilios distintos)
+endif
+
+' ── CLIENTE: ¿PERSONA NUEVA? ─────────────────
+if (¿Cliente existe en BD?\n//buscar por CURP → fallback nombre+tel//) then (NO — persona nueva)
+
+  #FFF3CD:**Cliente = persona_nueva**;
+  note right
+    Resolución automática — sin consultas:
+    · c12 = persona_nueva
+    · c21 = no_aplica  (sin préstamo previo)
+    · c22 = no_aplica  (nivel NUEVO no requiere historial)
+    · c23 = no_aplica  (sin historial de liquidaciones)
+    · c24 = no_aplica  (sin semana previa)
+    · c25 = persona_nueva
+    · c26 = persona_nueva
+  end note
+
+else (SÍ — existe en BD)
+
+  #D4EDDA:**Cliente identificado**\npersona_id asignado → c12 = "si";
+  #E8EEF8:Consultar historial cliente\nGET /api/filtrado-clientes/historial/{persona_id};
+  note right
+    Evaluar:
+    · c21 — aumento ≤ $2,000
+    · c22 — nivel válido por scores
+    · c23 — sin liq. especial + sube nivel
+    · c24 — última semana respetada
+    · c25 — score aceptable
+    · c26 — sin liq. especial como cliente
+  end note
+
+endif
+
+' ── AVAL: ¿PERSONA NUEVA? ────────────────────
+if (¿Aval existe en BD?\n//buscar por CURP → fallback nombre+tel//) then (NO — persona nueva)
+
+  #FFF3CD:**Aval = persona_nueva**;
+  note right
+    Resolución automática — sin consultas:
+    · c13 = persona_nueva
+    · c14 = persona_nueva  (sin historial como cliente)
+    · c15 = persona_nueva  (nunca avaló a nadie)
+    · c16 = persona_nueva  (sin liq. especial)
+    · c17 = persona_nueva  (no activo en ninguna agencia)
+  end note
+
+else (SÍ — existe en BD)
+
+  #D4EDDA:**Aval identificado**\npersona_id asignado → c13 = "si";
+  #E8EEF8:Consultar historial aval\nGET /api/filtrado-clientes/historial/{persona_id};
+  note right
+    Evaluar:
+    · c14 — aval no fue cliente moroso
+    · c15 — aval no avaló a cliente moroso
+    · c16 — aval sin liquidación especial
+    · c17 — aval no activo en otra agencia
+  end note
+
+endif
+
+' ── DOMICILIO ────────────────────────────────
+#E8EEF8:Validar domicilio con no_servicio corregido\nMCP prestamos_v2;
+note right
+  · c18 — máx. 3 clientes activos
+  · c19 — saldo total + monto nuevo ≤ límite
+  · c20 — sin cruce de agencia
+  ——
+  Si no hay NS corregido → c18/c19/c20 = null
+  (no bloquean por sí solos)
+end note
+
+' ── REGLA COMPLEMENTARIA ─────────────────────
+if (¿Solicitud por política\ncréditos a avales?) then (sí)
+  :Consultar tabla de autorización\nsemanas_pagadas ≥ requeridas;
+else (no)
+endif
+
+' ── ACUMULAR HALLAZGOS ───────────────────────
+#E8EEF8:Acumular todos los hallazgos\nde los checks evaluados;
+
+if (¿Algún check bloqueante\ncomo false o "no"?) then (SÍ)
+  #FDDCDC:**requiere_correccion**\nstatus → en_correccion;
+else (NO)
+  #D4EDDA:**sin_hallazgos**\nstatus → en_vistos_buenos;
+endif
+
+' ── GUARDAR Y VERIFICAR ──────────────────────
+#E8EEF8:**6. PATCH /filtrado**\nstatus_filtrado · checks · acciones\ncontexto_filtrado · diagnostico;
+
+#E8EEF8:**7. GET verificación**\nConfirmar alineación · Centrifugo cierre;
+
+stop
+
+@enduml

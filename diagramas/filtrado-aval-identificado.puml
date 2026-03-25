@@ -1,0 +1,96 @@
+@startuml filtrado-aval-identificado
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam ArrowColor #1E50A0
+skinparam ArrowThickness 1.5
+
+skinparam activity {
+  BackgroundColor #E8EEF8
+  BorderColor #1E50A0
+  FontColor #111111
+  DiamondBackgroundColor #FFF3CD
+  DiamondBorderColor #C07000
+  DiamondFontColor #111111
+  StartColor #1E50A0
+  EndColor #2E7D32
+}
+
+skinparam note {
+  BackgroundColor #F5F7FF
+  BorderColor #99AACC
+  FontSize 10
+}
+
+title Aval identificado en BD\n//extensión del flujo principal//
+
+start
+
+#D4EDDA:BD: match por CURP\n→ fallback nombre + teléfono;
+note right
+  Si hay duplicados (misma CURP):
+  usar el registro con
+  created_at más temprano
+end note
+
+#D4EDDA:c13 = "si"\npersona_id aval asignado;
+
+#E8EEF8:GET /api/filtrado-clientes\n     /historial/{persona_id};
+note right
+  Devuelve historial del aval
+  como cliente (si alguna vez lo fue)
+  y como avalador
+end note
+
+' ── c14: AVAL MOROSO ─────────────────────────
+partition "**c14 — Aval no fue cliente moroso**" {
+  if (¿el aval tiene préstamos\ncon saldo pendiente o mora?) then (SÍ)
+    #FDDCDC:c14 = "no"\n+ hallazgo: aval fue cliente moroso;
+  else (NO)
+    #D4EDDA:c14 = "si";
+  endif
+}
+
+' ── c15: AVALÓ MOROSO ────────────────────────
+partition "**c15 — Aval no avaló a cliente moroso**" {
+  #E8EEF8:MCP prestamos_v2\nSELECT * WHERE aval_persona_id = aval\nAND cliente tiene saldo pendiente;
+  if (¿el aval avaló a alguien\nque resultó moroso?) then (SÍ)
+    #FDDCDC:c15 = "no"\n+ hallazgo: avaló a cliente moroso;
+  else (NO)
+    #D4EDDA:c15 = "si";
+  endif
+}
+
+' ── c16: LIQ ESPECIAL COMO AVAL ──────────────
+partition "**c16 — Aval sin liquidación especial como avalado**" {
+  #E8EEF8:MCP liquidaciones\nSELECT * WHERE persona_id = aval\nAND tipo_liquidacion = 'especial';
+  if (¿el préstamo que avaló\nterminó en liquidación especial?) then (SÍ)
+    #FDDCDC:c16 = "no"\n+ hallazgo: liq. especial como avalado;
+  else (NO)
+    #D4EDDA:c16 = "si";
+  endif
+}
+
+' ── c17: ACTIVO OTRA AGENCIA ─────────────────
+partition "**c17 — Aval no activo en otra agencia**" {
+  #E8EEF8:MCP prestamos_v2\nSELECT * WHERE persona_id = aval\nAND Gerencia != gerencia_solicitud\nAND Saldo > 0;
+  if (¿el aval tiene crédito activo\nen una agencia distinta?) then (SÍ)
+    #FDDCDC:c17 = "no"\n+ hallazgo: aval activo en otra agencia;
+    note right
+      Gerencias conocidas:
+      GERGC = Capital Xpress
+      GERD  = Dinero Xpress
+      GERDC = Dec Xpress
+      GERE  = Efectivo Xpress
+    end note
+  else (NO)
+    #D4EDDA:c17 = "si";
+  endif
+}
+
+#D4EDDA:Checks aval resueltos\nRegresar al flujo principal;
+
+stop
+
+@enduml
