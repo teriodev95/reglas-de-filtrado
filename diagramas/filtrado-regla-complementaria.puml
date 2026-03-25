@@ -1,0 +1,73 @@
+@startuml filtrado-regla-complementaria
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam ArrowColor #1E50A0
+skinparam ArrowThickness 1.5
+
+skinparam activity {
+  BackgroundColor #E8EEF8
+  BorderColor #1E50A0
+  FontColor #111111
+  DiamondBackgroundColor #FFF3CD
+  DiamondBorderColor #C07000
+  DiamondFontColor #111111
+  StartColor #1E50A0
+  EndColor #2E7D32
+}
+
+skinparam note {
+  BackgroundColor #F5F7FF
+  BorderColor #99AACC
+  FontSize 10
+}
+
+title Regla Complementaria — Créditos a Avales\n//Solo aplica cuando el solicitante no tiene historial propio como cliente//
+
+start
+
+#E8EEF8:Identificar parámetros del préstamo\nque el solicitante avaló;
+note right
+  · nivel del cliente avalado
+  · monto de ese préstamo
+  · plazo en semanas (16 / 21 / 26)
+  · semanas_pagadas reales
+end note
+
+#E8EEF8:Ubicar celda en tabla de autorización\n[nivel × rango_monto × plazo];
+note right
+  Rangos de monto:
+  $2,000 – $4,900
+  $5,000 – $7,900
+  $8,000 – $9,900
+  $10,000 – $11,900
+  $12,000 – $20,000
+end note
+
+if (¿La celda es N/A?) then (SÍ)
+  #FDDCDC:cumple = false\nmotivo: combinación no permitida;
+  stop
+else (NO — tiene valor numérico)
+endif
+
+if (semanas_pagadas >=\nsemanas_requeridas?) then (SÍ)
+  #D4EDDA:cumple = true\nProcede el crédito;
+else (NO)
+  #FDDCDC:cumple = false\nmotivo: no alcanza semanas mínimas;
+endif
+
+#E8EEF8:Registrar resultado en\ntabla_credito_aval;
+note right
+  {
+    nivel, monto_solicitado,
+    rango_monto, plazo_semanas,
+    semanas_requeridas,
+    semanas_pagadas,
+    cumple, motivo
+  }
+end note
+
+stop
+
+@enduml
