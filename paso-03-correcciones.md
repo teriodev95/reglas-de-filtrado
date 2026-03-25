@@ -41,7 +41,19 @@ Contrastar lo leido por OCR contra lo capturado. Corregir directamente cuando ha
 
 ## Si no hay correcciones
 
-No registrar accion. Continuar al paso 4.
+No registrar accion. Continuar a la validacion r01.
+
+## r01 — Bloqueo inmediato por domicilio compartido
+
+Al terminar las correcciones, evaluar r01 antes de continuar al paso 4.
+
+**Condicion de bloqueo** — cualquiera de las siguientes:
+- `no_servicio` cliente == `no_servicio` aval (con valores ya corregidos)
+- El comprobante de cliente y aval es el mismo archivo o imagen identica
+
+Si se cumple: resolver `r01 = false`, hacer PATCH inmediato con `status_filtrado = requiere_correccion` y **detener el flujo**. No continuar al paso 4.
+
+Si los domicilios son distintos: resolver `r01 = true` y continuar al paso 4.
 
 ## Evento Centrifugo
 
