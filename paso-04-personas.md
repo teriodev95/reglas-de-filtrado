@@ -131,6 +131,33 @@ Con el historial resolver (ver diagrama `filtrado-cliente-identificado`):
 | LEAL | 4 creditos |
 | DIAMANTE | 4 creditos + acumulado puntual >= $50,000 |
 
+### ¿El cliente fue aval de alguien? — condicional para regla complementaria
+
+Despues de resolver los checks del historial, verificar si el solicitante aparece como aval en prestamos anteriores.
+
+```sql
+SELECT p.id, p.Nivel, p.Monto, p.Semanas, p.SemanasPagadas, p.Saldo,
+       p.Gerencia, p.FechaInicio
+FROM prestamos_v2 p
+WHERE p.aval_persona_id = {persona_id_cliente}
+ORDER BY p.FechaInicio DESC
+LIMIT 5
+```
+
+| Resultado | Decision |
+|---|---|
+| No aparece como aval | `fue_aval = false` — regla complementaria no aplica |
+| Aparece como aval de alguien con historial | `fue_aval = true` — activar 4D |
+
+Si `fue_aval = true`, guardar el prestamo mas reciente en el que fue aval como referencia:
+- nivel del cliente que avalo
+- monto de ese prestamo
+- plazo en semanas
+- semanas pagadas por ese cliente
+
+> Esto determina si la solicitud entra bajo la politica de creditos a avales
+> y si el 4D debe ejecutarse.
+
 Continuar a **4B — Aval**.
 
 ---
@@ -201,9 +228,23 @@ FROM prestamos_v2 WHERE NoServicio = '{no_servicio_corregido}'
 
 ## 4D — Regla complementaria (si aplica)
 
-Solo si la solicitud es por politica de creditos a avales (el solicitante no tiene historial propio pero avalo a alguien).
+Solo ejecutar si `fue_aval = true` (detectado en 4A al revisar prestamos_v2).
 
-Consultar la tabla de autorizacion en `paso-05-checks.md`. Verificar que `semanas_pagadas >= valor_requerido`.
+Con los datos del prestamo en que fue aval (nivel, monto, plazo, semanas_pagadas), consultar la tabla de autorizacion:
+
+1. Ubicar la fila por **nivel del cliente que avalo**
+2. Ubicar la columna por **rango del monto de ese prestamo**
+3. Ubicar la sub-columna por **plazo en semanas** (16 / 21 / 26)
+4. Leer el valor de la celda
+
+| Celda | Decision |
+|---|---|
+| `N/A` | No procede — combinacion no autorizada |
+| Numero | Comparar: `semanas_pagadas >= valor` → procede / no procede |
+
+Ver tabla completa en `regla-complementaria-creditos-avales.md`.
+
+Si `fue_aval = false` — omitir este paso completamente.
 
 ---
 
