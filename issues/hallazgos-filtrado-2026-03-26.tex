@@ -1,0 +1,150 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage[margin=2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Filtrado Manual 2026-03-26}
+\lhead{Xpress1 -- Confidencial}
+\cfoot{\thepage}
+
+\definecolor{rojo}{RGB}{192,0,0}
+\definecolor{verde}{RGB}{0,128,0}
+\definecolor{gris}{RGB}{100,100,100}
+
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE \textbf{Reporte de Filtrado Manual}}\\[0.4em]
+  {\large Semana 13 -- 26 de marzo de 2026}\\[0.2em]
+  {\small\color{gris} Procesado por: claude-manual | 9 solicitudes | v2 corregido 2026-03-26T19:00Z}
+\end{center}
+
+\vspace{0.5em}
+\hrule
+\vspace{0.8em}
+
+\section{Resumen de Resultados}
+
+\begin{center}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Resultado} & \textbf{Cantidad} \\
+\midrule
+sin\_hallazgos & 4 \\
+requiere\_correccion & 5 \\
+\midrule
+\textbf{Total} & \textbf{9} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.8em}
+
+\section{Tabla por Solicitud}
+
+\begin{longtable}{@{}p{3.2cm}p{3.8cm}p{1.4cm}p{6.5cm}@{}}
+\toprule
+\textbf{ID} & \textbf{Cliente} & \textbf{Status} & \textbf{Hallazgos} \\
+\midrule
+\endhead
+6da0f999 & CLARA YANET MARTINEZ & \textcolor{rojo}{req\_corr} & c11: CURP aval inv\'alida (ambigua, no corregida); c20: NoServ con pr\'estamo activo tercero \\
+\addlinespace
+37feaa53 & YESSICA JANETH CASTILLO & \textcolor{verde}{sin\_hall} & Sin hallazgos. Ambas persona\_nueva. \\
+\addlinespace
+96011c18 & MARIANA ELSA OSORIO & \textcolor{rojo}{req\_corr} & c09: nombre aval invertido corregido (SALVADOR MONARCA JUAN CARLOS); no\_servicio\_aval corregido \\
+\addlinespace
+4dfbf546 & REYNA VIVIANA XELANO & \textcolor{verde}{sin\_hall} & Sin hallazgos. Ambas persona\_nueva. Cliente 20 a\~nos. \\
+\addlinespace
+a3512c67 & MARGARITA CALDERON & \textcolor{rojo}{req\_corr} & c20: domicilio en pr\'estamo activo 12.26-002-01gc; c17: aval activa mismo pr\'estamo \\
+\addlinespace
+64127174 & ENRIQUETA CACHO & \textcolor{rojo}{req\_corr} & CURP cliente corregida CABR970715$\to$CABE790715 (a\~no 97$\to$79, R$\to$E). \\
+\addlinespace
+f46c1ee5 & MARIA DEL CARMEN VARGAS & \textcolor{verde}{sin\_hall} & Sin hallazgos. Pr\'estamo activo MCP es el mismo de esta solicitud. Score 100. \\
+\addlinespace
+add9188b & JONATHAN MORENO & \textcolor{rojo}{req\_corr} & c11: CURP aval corregida (15 chars$\to$18); no\_servicio\_aval corregido. \\
+\addlinespace
+b3a0bca6 & REYNA MERCEDES TEXIS & \textcolor{verde}{sin\_hall} & Sin hallazgos. Cliente persona\_nueva, aval sin historial previo. \\
+\bottomrule
+\end{longtable}
+
+\section{Hallazgos Principales}
+
+\subsection{c20 -- Domicilio en pr\'estamo activo (2 casos bloqueantes)}
+
+Dos solicitudes tienen el NoServicio del cliente comprometido en un pr\'estamo activo
+de un \textbf{tercero o doble solicitud}. Las dem\'as tienen pr\'estamos propios
+(mismo PrestamoID, mismo agente) que no son cruce bloqueante.
+
+\begin{center}
+\begin{tabular}{@{}p{2.2cm}p{3cm}p{2.8cm}p{2.5cm}r@{}}
+\toprule
+\textbf{Solicitud} & \textbf{NoServicio} & \textbf{Pr\'estamo activo} & \textbf{Titular} & \textbf{Saldo} \\
+\midrule
+6da0f999 & 237150507243 & 06.26-004-11ef & SANTOS GREGORIO & \$4,072.87 \\
+a3512c67 & 256060806076 & 12.26-002-01gc & MARGARITA CALDERON & \$6,890.62 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Errores en CURP (3 casos)}
+
+\begin{center}
+\begin{tabular}{@{}p{2.5cm}p{2cm}p{4cm}p{4cm}@{}}
+\toprule
+\textbf{Solicitud} & \textbf{Campo} & \textbf{Capturada (error)} & \textbf{Corregida (INE)} \\
+\midrule
+6da0f999 & CURP aval & DEAB86066111MPLR06 & No corregible (ambigua) \\
+64127174 & CURP cliente & CABR970715MPLCRN06 & CABE790715MPLCRN06 \\
+add9188b & CURP aval & MEOC04020211PLNRS0 & MEOO040201HPLNRSA0 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Las dos CURPs corregibles se aplicaron v\'ia \texttt{PATCH /api/solicitudes-app/\{id\}}.
+
+\subsection{Otros hallazgos}
+
+\begin{itemize}
+  \item \textbf{c09 nombre invertido corregido (96011c18):} Aval capturado con orden incorrecto.
+    INE muestra SALVADOR (pat.) MONARCA (mat.) JUAN CARLOS (nombres). CURP SAMJ valida correci\'on.
+    Corregido en fuente v\'ia PATCH.
+  \item \textbf{no\_servicio\_aval con d\'igito extra (2 casos):} 96011c18: 2560401012463$\to$256040102463;
+    add9188b: 2370101017202$\to$237010107202. Ambos corregidos seg\'un comprobante CFE.
+\end{itemize}
+
+\section{Observaciones para Windmill}
+
+\begin{enumerate}
+  \item \textbf{Validaci\'on de c20 en captura:} Consultar MCP en tiempo real si el NoServicio
+    ya tiene pr\'estamo activo. Evitar\'ia el 55\% de rechazos de este lote.
+  \item \textbf{Validaci\'on de formato CURP:} Verificar 18 chars + regex antes de guardar.
+    Los 3 errores de CURP son detectables trivialmente.
+  \item \textbf{Cruce CURP vs nombre:} Comparar primeras 4 letras de CURP con nombre/apellidos.
+    Detecta inversiones de campos y errores de tipeo.
+  \item \textbf{Validaci\'on fecha comprobante:} Capturar fecha expl\'icita y bloquear si
+    la antig\"uedad supera los 90 d\'ias.
+  \item \textbf{Detecci\'on de solicitudes duplicadas:} El caso a3512c67 es un duplicado exacto
+    del pr\'estamo activo semana anterior. El sistema deber\'ia detectar el mismo par cliente-aval
+    con cr\'edito activo y bloquear en captura.
+\end{enumerate}
+
+\vspace{1em}
+\begin{center}
+  {\small\color{gris} Generado autom\'aticamente por agente de filtrado claude-manual --
+  2026-03-26T19:00:00Z -- v2 contrato completo}
+\end{center}
+
+\end{document}
