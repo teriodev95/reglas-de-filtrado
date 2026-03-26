@@ -42,48 +42,43 @@ partition "**1. Tomar solicitud**" {
     · filtered_by ya tiene valor → no reprocesar
     · agencia / gerencia / semana en null → alertar
     · teléfonos placeholder → alertar
+    · cliente y aval mismo no_servicio → alertar
   end note
 }
 
 ' ═══════════════════════════════════════════════
-partition "**2. OCR — 4 documentos en paralelo**" {
-  #E8EEF8:INE cliente · INE aval\nComprobante cliente · Comprobante aval;
+partition "**2. Datos de captura — ML Kit**" {
+  #E8EEF8:Leer captura.cliente y captura.aval\npopulados por ML Kit en la app;
   note right
-    Extraer por documento:
-    · INE: nombre, CURP, vigencia, domicilio
+    ML Kit extrae del dispositivo:
+    · INE: nombre, CURP, vigencia, genero,
+      fecha_nacimiento, domicilio
     · Comprobante: no_servicio / contrato,
-      fecha_emision, titular, dirección
-    · Recencia comprobante ≤ 3 meses
+      fecha_comprobante, tipo_comprobante
+    Los datos llegan ya validados desde la app.
   end note
 }
 
 ' ═══════════════════════════════════════════════
-partition "**3. Correcciones — OCR vs Captura**" {
-  #E8EEF8:Contrastar OCR contra lo capturado;
+partition "**3. Validación de captura**" {
+  #E8EEF8:Verificar integridad de los datos\nde captura.cliente y captura.aval;
   note right
-    **Actores:**
-    · Bot de filtrado → detecta la inconsistencia
-    · Agente de IA → aplica la corrección directo en BD
+    **c01 — Legibilidad:**
+    · true si ML Kit pudo extraer nombre y/o CURP
     ——
-    **Si OCR detecta discrepancia corregible:**
-    · Agente de IA ejecuta PATCH /solicitudes/{id}
-      con el valor corregido
-    · Registra acción: tipo=correccion, actor=agente_ia,
-      estado=aplicada, valor_original, valor_corregido
-    · El flujo continúa con los datos ya corregidos
+    **c02/c03 — Vigencia INE:**
+    · Leer captura.cliente.vigencia / captura.aval.vigencia
     ——
-    **Casos corregibles:**
-    · CURP distinta al INE → corregir con INE
-    · NoServicio con dígitos extra/transpuestos → corregir
-    · Nombres en campos invertidos → corregir
-    · Domicilio del aval copiado del cliente → corregir
+    **c04/c05 — Recencia comprobante:**
+    · Leer fecha_comprobante de captura
+    · cumple si ≤ 3 meses desde fecha_solicitud
     ——
-    **Si imagen no permite confirmar:**
-    · estado = "sugerida" — no se modifica BD
+    **c10/c11 — CURP estructuralmente válido:**
+    · Verificar formato, prefijo, fecha, sexo
+      contra los campos de captura
     ——
-    **Bloqueante (no corregible):**
-    · Nombre completamente distinto al INE → c08/c09 = false
-    · CURP inválida o datos completamente distintos → c10/c11 = false
+    **c08/c09 — Nombre coincide:**
+    · null (no hay fuente OCR independiente)
   end note
 
   ' ── r01: BLOQUEO INMEDIATO ───────────────────
@@ -248,9 +243,9 @@ partition "**4B. Aval — ¿existe en BD?**" {
 
 ' ═══════════════════════════════════════════════
 partition "**4C. Domicilio — c18, c19, c20**" {
-  #E8EEF8:MCP prestamos_v2\nWHERE NoServicio = '{no_servicio_corregido}';
+  #E8EEF8:MCP prestamos_v2\nWHERE NoServicio = '{captura.cliente.no_servicio}';
   note right
-    Si no hay NS corregido →
+    Si no hay NS en captura →
     c18 / c19 / c20 = null
     (no bloquean por sí solos)
   end note
