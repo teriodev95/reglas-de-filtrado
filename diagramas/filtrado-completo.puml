@@ -30,7 +30,16 @@ skinparam partition {
   FontStyle bold
 }
 
-title Filtrado Autónomo — Flujo Completo con Reglas
+title Filtrado Autónomo — Punto de Entrada Operativo
+
+floating note right
+  Convenciones operativas de este diagrama:
+  · solicitud.sucursal = oficina física donde entra la solicitud
+  · solicitud.gerencia = marca / línea de negocio (GERGC, GERD, GERDC, GERE)
+  · No usar "agencia" como sinónimo ambiguo en la lógica
+  · c17 y c20 se resuelven por gerencia; sucursal no bloquea por sí sola
+  · Paso 3 puede corregir captura con evidencia documental y continuar
+end note
 
 start
 
@@ -38,9 +47,17 @@ start
 partition "**1. Tomar solicitud**" {
   #E8EEF8:GET solicitud · PATCH filtered_by = bot, filtered_at = now;
   note right
+    Endpoint de toma:
+    PATCH /api/solicitudes-app/{id}/filtrado
+    Editar solo:
+    · filtered_by
+    · filtered_at
+    · status_filtrado solo si ya se cierra
+    · no tocar checks todavía
+    ——
     Verificar antes de tomar:
     · filtered_by ya tiene valor → no reprocesar
-    · agencia / gerencia / semana en null → alertar
+    · sucursal / gerencia / semana en null → alertar
     · teléfonos placeholder → alertar
     · cliente y aval mismo no_servicio → alertar
   end note
@@ -55,7 +72,9 @@ partition "**2. Datos de captura — ML Kit**" {
       fecha_nacimiento, domicilio
     · Comprobante: no_servicio / contrato,
       fecha_comprobante, tipo_comprobante
-    Los datos llegan ya validados desde la app.
+    La app prellena; el bot todavía debe
+    contrastar contra documento y corregir
+    cuando haya evidencia clara.
   end note
 }
 
@@ -78,13 +97,43 @@ partition "**3. Validación de captura**" {
       contra los campos de captura
     ——
     **c08/c09 — Nombre coincide:**
-    · null (no hay fuente OCR independiente)
+    · Comparar captura vs OCR/INE
+    · Si el orden está invertido pero la
+      persona es claramente identificable →
+      corregir, no bloquear
+  end note
+
+  #E8EEF8:Aplicar correcciones inmediatas\nsi INE/comprobante contradice captura;
+  note right
+    Endpoint de corrección:
+    PATCH /api/solicitudes-app/{id}
+    Editar solo campos fuente corregibles:
+    · curp
+    · nombres / apellidos
+    · no_servicio
+    · contrato
+    · domicilio
+    ——
+    Corregibles con PATCH inmediato:
+    · curp
+    · nombres / apellidos
+    · no_servicio
+    · contrato
+    · domicilio
+    Registrar accion = correccion
+    con estado "aplicada" o "sugerida".
   end note
 
   ' ── r01: BLOQUEO INMEDIATO ───────────────────
   if (r01 — ¿Cliente y aval\ncomparten domicilio?) then (SÍ\nMismo NS o comprobante idéntico)
     #FDDCDC:**BLOQUEO INMEDIATO**\nr01 = false;
     #FDDCDC:PATCH requiere_correccion\nFIN DEL FLUJO;
+    note right
+      Endpoint de cierre inmediato:
+      PATCH /api/solicitudes-app/{id}/filtrado
+      Enviar diagnostico simplificado y
+      resultado_filtrado mínimo.
+    end note
     stop
   else (NO — domicilios distintos)
     #D4EDDA:r01 = true;
@@ -95,16 +144,35 @@ partition "**3. Validación de captura**" {
 partition "**4A. Cliente — ¿existe en BD?**" {
   #E8EEF8:Buscar por CURP corregida (paso 3);
   note right
+    Regla anti-homónimos:
+    1. Resolver sucursal base de la solicitud:
+       agencias.AgenciaID -> GerenciaID
+       gerencias.GerenciaID -> SucursalID
+    2. AGE037 = GERE011 -> SucursalID GERE
+    3. El fallback por nombre empieza
+       en esa misma sucursal, no global
+    ——
     **1. Buscar por CURP corregida:**
-    SELECT … FROM personas WHERE curp = '{curp_corregida}'
+    SELECT ... FROM personas
+    WHERE curp = '{curp_corregida}'
     ——
     **2. Fallback por nombres (si no hay CURP o no hay match):**
     OCR/INE a veces trae: APELLIDO_PAT APELLIDO_MAT NOMBRE
     BD almacena: NOMBRE APELLIDO_PAT APELLIDO_MAT
     → Construir variante A (orden OCR) y variante B (invertido)
     → Buscar ambas con LIKE en CONCAT(nombres, ap_pat, ap_mat)
+    → Cruzar solo personas con actividad
+      o relación en la misma SucursalID
+      de la solicitud
+    → Solo abrir a otra sucursal si además
+      coincide CURP, teléfono o historial fuerte
     ——
-    **Duplicados:** usar created_at más temprano
+    **Duplicados en misma sucursal:**
+    usar created_at más temprano
+    ——
+    Si hay candidatos en varias sucursales
+    y solo coincide nombre:
+    tratar como ambiguo, no asignar persona_id
   end note
 
   if (¿Cliente existe en BD?) then (NO — persona nueva)
@@ -138,27 +206,67 @@ partition "**4A. Cliente — ¿existe en BD?**" {
 
     if (¿score_final cumple\npara el nivel?) then (NO)
       #FDDCDC:c25 = "no" · hallazgo: score insuficiente;
+      note right
+        Revisar:
+        · GET /api/filtrado-clientes/historial/{persona_id}
+        · score_final
+        · tabla de niveles en paso-04-personas.md
+        Criterio:
+        · c25 evalúa score contra el nivel solicitado
+        · si cliente = persona_nueva → c25 = persona_nueva
+      end note
     else (SÍ)
       #D4EDDA:c25 = "si";
     endif
 
     if (¿monto actual − último\npréstamo > $2,000?) then (SÍ)
       #FDDCDC:c21 = false · hallazgo: aumento excede $2,000;
+      note right
+        Revisar:
+        · GET /api/filtrado-clientes/historial/{persona_id}
+        · monto_solicitado actual
+        · monto_ultimo_prestamo
+        Criterio:
+        · c21 = (monto_actual - último_prestamo) <= 2000
+        · si cliente = persona_nueva → c21 = no_aplica
+      end note
     else (NO)
       #D4EDDA:c21 = true;
     endif
 
     if (¿semana solicitud respeta\ncierre del último crédito?) then (NO)
       #FDDCDC:c24 = false · hallazgo: semana no respetada;
+      note right
+        Revisar:
+        · GET /api/filtrado-clientes/historial/{persona_id}
+        · semana de solicitud
+        · saldo y tarifa del último crédito
+        Criterio:
+        · si el crédito activo está en última semana
+          (saldo < tarifa), solo puede mantener
+          mismo monto y mismo nivel
+        · ver paso-04-personas.md
+        · ver matriz-validacion-filtrado-v2.md
+      end note
     else (SÍ)
       #D4EDDA:c24 = true;
     endif
 
     #E8EEF8:MCP liquidaciones\nWHERE persona_id = cliente\nAND tipo_liquidacion = 'especial';
     if (¿tiene liquidación\nespecial previa?) then (SÍ)
-      #FDDCDC:c26 = "no" · hallazgo: liq. especial detectada;
+      #FDDCDC:c26 = "no" · hallazgo bloqueante: liq. especial detectada;
+      note right
+        Revisar:
+        · MCP liquidaciones del cliente
+        · tipo_liquidacion = especial
+        Criterio:
+        · c26 = "no" bloquea por sí solo
+        · c23 es un check adicional, no el bloqueo principal
+        · ver matriz-validacion-filtrado-v2.md
+        · ver criterios-operativos-filtrado.md
+      end note
       if (¿c26 = "no" Y el nivel\nsolicitado sube?) then (SÍ)
-        #FDDCDC:c23 = "no" · hallazgo: liquidó con descuento y sube;
+        #FDDCDC:c23 = "no" · hallazgo adicional: liquidó con descuento y sube;
       else (NO)
         #D4EDDA:c23 = "no_aplica";
       endif
@@ -187,7 +295,11 @@ partition "**4A. Cliente — ¿existe en BD?**" {
 partition "**4B. Aval — ¿existe en BD?**" {
   #E8EEF8:Buscar por CURP corregida\n→ fallback nombre + normalización de orden;
   note right
-    Misma lógica que 4A:
+    Misma lógica anti-homónimos que 4A:
+    1. Resolver SucursalID desde AgenciaID
+    2. Acotar fallback por nombre a esa sucursal
+    3. Abrir fuera solo con evidencia fuerte
+    ——
     1. CURP corregida del paso 3
     2. Fallback nombres: variante A (OCR) + variante B (invertido)
   end note
@@ -226,14 +338,43 @@ partition "**4B. Aval — ¿existe en BD?**" {
       #D4EDDA:c16 = "si";
     endif
 
-    #E8EEF8:MCP prestamos_v2\nWHERE persona_id = aval\nAND Gerencia != gerencia_solicitud\nAND Saldo > 0;
-    if (¿aval activo en\notra agencia?) then (SÍ)
-      #FDDCDC:c17 = "no" · hallazgo: aval activo en otra agencia;
+    #E8EEF8:MCP query cerrada para c17\naval activo en otra agencia;
+    if (¿aval activo en\notra gerencia?) then (SÍ)
+      #FDDCDC:c17 = "no" · hallazgo: aval activo en otra gerencia;
       note right
-        GERGC = Capital Xpress
-        GERD  = Dinero Xpress
-        GERDC = Dec Xpress
-        GERE  = Efectivo Xpress
+        Query MCP definitiva:
+        SELECT
+          p.PrestamoID,
+          p.aval_persona_id,
+          p.cliente_persona_id,
+          p.Agente AS agencia_encontrada,
+          a.GerenciaID AS gerencia_encontrada,
+          g.SucursalID AS sucursal_encontrada,
+          s.nombre AS sucursal_nombre,
+          p.Saldo,
+          p.Monto_otorgado,
+          p.Semana,
+          p.Anio,
+          p.created_at
+        FROM prestamos_v2 p
+        LEFT JOIN agencias a
+          ON a.AgenciaID = p.Agente
+        LEFT JOIN gerencias g
+          ON g.GerenciaID = a.GerenciaID
+        LEFT JOIN sucursales s
+          ON s.sucursalID = g.SucursalID
+        WHERE p.aval_persona_id = '{persona_id_aval}'
+          AND p.Saldo > 0
+          AND p.Agente <> '{agencia_solicitud}'
+        ORDER BY p.created_at DESC;
+        ——
+        Regla operativa:
+        · si devuelve filas → c17 = "no"
+        · documentar agencia_encontrada,
+          gerencia_encontrada y sucursal_nombre
+        · el nombre legacy dice "otra_agencia"
+          y la query también bloquea por otra agencia
+          aunque sea de cualquier gerencia
       end note
     else (NO)
       #D4EDDA:c17 = "si";
@@ -248,6 +389,11 @@ partition "**4C. Domicilio — c18, c19, c20**" {
     Si no hay NS en captura →
     c18 / c19 / c20 = null
     (no bloquean por sí solos)
+    c20 no significa "otra gerencia" solamente.
+    Significa: el mismo domicilio ya está
+    comprometido en otro préstamo activo.
+    Puede estar en cualquier agencia,
+    gerencia o sucursal.
   end note
 
   if (¿total clientes activos\nen domicilio > 3?) then (SÍ)
@@ -266,10 +412,37 @@ partition "**4C. Domicilio — c18, c19, c20**" {
     #D4EDDA:c19 = true;
   endif
 
-  if (¿gerencia del domicilio\ndistinta a la solicitud?) then (SÍ)
-    #FDDCDC:c20 = false · hallazgo: cruce de agencia en domicilio;
+  if (¿el mismo domicilio aparece\nen otro préstamo activo?) then (SÍ)
+    #FDDCDC:c20_domicilio_no_cruce_en_prestamo_activo = false · hallazgo: domicilio cruzado en otro préstamo activo;
+    note right
+      Query MCP de referencia:
+      SELECT
+        p.NoServicio,
+        p.PrestamoID,
+        p.Agente AS agencia_encontrada,
+        a.GerenciaID AS gerencia_encontrada,
+        g.SucursalID AS sucursal_encontrada,
+        s.nombre AS sucursal_nombre,
+        p.Saldo,
+        p.created_at
+      FROM prestamos_v2 p
+      LEFT JOIN agencias a
+        ON a.AgenciaID = p.Agente
+      LEFT JOIN gerencias g
+        ON g.GerenciaID = a.GerenciaID
+      LEFT JOIN sucursales s
+        ON s.sucursalID = g.SucursalID
+      WHERE p.NoServicio = '{no_servicio_corregido}'
+        AND p.Saldo > 0
+        AND p.PrestamoID <> '{prestamo_actual_si_existe}';
+      ——
+      Si devuelve filas:
+      · c20_domicilio_no_cruce_en_prestamo_activo = false
+      · documentar agencia_encontrada,
+        gerencia_encontrada y sucursal_nombre
+    end note
   else (NO)
-    #D4EDDA:c20 = true;
+    #D4EDDA:c20_domicilio_no_cruce_en_prestamo_activo = true;
   endif
 }
 
@@ -301,6 +474,12 @@ partition "**5–7. Resultado, Guardar y Verificar**" {
   note right
     Resolver TODOS aunque ya haya un bloqueo.
     El revisor necesita el panorama completo.
+    Punto de entrada para futuras sesiones:
+    1. Tomar solicitud
+    2. Corregir captura con evidencia
+    3. Resolver r01
+    4. Identificar personas
+    5. Evaluar checks y guardar
   end note
 
   if (¿Algún check bloqueante\n= false o "no"?) then (SÍ)
@@ -311,13 +490,53 @@ partition "**5–7. Resultado, Guardar y Verificar**" {
 
   #E8EEF8:**PATCH /filtrado**\nstatus_filtrado · checks · acciones\ncontexto_filtrado · diagnostico\nmotivo_rechazo · doc_invalido_detalle;
   note right
+    Endpoint final:
+    PATCH /api/solicitudes-app/{id}/filtrado
+    ——
+    Editar en este paso:
+    · status_filtrado
+    · filtered_by / filtered_at
+    · diagnostico
+    · motivo_rechazo
+    · doc_invalido_detalle
+    · resultado_filtrado.checks
+    · resultado_filtrado.hallazgos
+    · resultado_filtrado.acciones
+    · resultado_filtrado.contexto_filtrado
+    ——
     diagnostico, motivo_rechazo y
     doc_invalido_detalle siempre
     se llenan — nunca null.
     Usar "no_aplica" cuando no aplican.
+    ——
+    Diagnostico simplificado:
+    · 1 línea
+    · decisión principal primero
+    · sin narrativa larga
+    Ej:
+    "Requiere corrección documental del aval."
+    "Sin hallazgos."
+    ——
+    motivo_rechazo:
+    · causa principal única
+    doc_invalido_detalle:
+    · evidencia documental corta
+    resultado_filtrado:
+    · checks
+    · hallazgos
+    · acciones
+    · contexto_filtrado
   end note
 
   #E8EEF8:**GET verificación**\nConfirmar status · contexto_filtrado hidratado\nCentrifugo cierre;
+  note right
+    GET /api/solicitudes-app/{id}
+    Verificar:
+    · status alineado
+    · filtrado.status coherente
+    · diagnostico arriba
+    · resultado_filtrado sin meta legacy
+  end note
 }
 
 stop

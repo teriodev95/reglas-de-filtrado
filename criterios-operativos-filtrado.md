@@ -79,7 +79,7 @@ Usar `requiere_correccion` cuando:
 | Aval activo en otra agencia/gerencia | `c17 = false` |
 | Domicilio excede 3 clientes activos | `c18 = false` |
 | Domicilio excede monto maximo | `c19 = false` |
-| Domicilio cruza agencia/gerencia | `c20 = false` |
+| Domicilio ya usado en otro prestamo activo | `c20_domicilio_no_cruce_en_prestamo_activo = false` |
 | Aumento mayor a $2,000 | `c21 = false` |
 | Nivel no corresponde al historial | `c22 = false` |
 
