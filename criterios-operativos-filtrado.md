@@ -13,7 +13,7 @@ Que hacer:
 - `c12` o `c13` = `false` (persona_id no asignado)
 - `c14`, `c15`, `c16`, `c17` = `true` (sin historial = sin conflictos posibles)
 - `c25` = `true` (sin historial negativo)
-- `c26` = `true` (sin liquidaciones)
+- `c26` = `true` (sin liquidaciones `ESPECIAL`)
 - **no usar `requiere_correccion`** solo por esto
 - registrar accion tipo `confirmacion` con detalle "Persona nueva"
 
@@ -75,7 +75,7 @@ Usar `requiere_correccion` cuando:
 | CURP no coincide con INE y no se puede corregir (formato invalido, datos completamente distintos) | `c10 = false` o `c11 = false` |
 | Aval fue cliente moroso confirmado | `c14 = false` |
 | Aval avalo a cliente moroso confirmado | `c15 = false` |
-| Aval tiene liquidacion especial | `c16 = false` |
+| Aval participo en prestamo con liquidacion `ESPECIAL` | `c16 = false` |
 | Aval activo en otra agencia/gerencia | `c17 = false` |
 | Domicilio excede 3 clientes activos | `c18 = false` |
 | Domicilio excede monto maximo | `c19 = false` |
@@ -93,6 +93,9 @@ Usar `requiere_correccion` cuando:
 - **Apellido invertido en captura**: corregible si la persona es claramente la misma.
 - **Nombre completamente diferente al INE**: bloqueante (`c08/c09 = false`).
 - **Domicilio compartido cliente/aval**: bloqueante (`r01 = false`).
+
+- **Liquidacion `ESPECIAL`**: bloqueante por si sola (`c26 = false` o `c16 = false` segun aplique).
+- **Liquidacion `CON_DESCUENTO`**: no equivale a `ESPECIAL`; usarla para `c23` cuando además haya subida de nivel.
 
 ---
 

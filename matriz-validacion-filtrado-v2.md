@@ -125,7 +125,7 @@ curl -X POST 'http://65.21.188.158:7400/list_mariadb_structure' \
 | `c13_persona_id_aval_asignado` | Si | Puede confirmar | Busqueda persona + confirmacion UI | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva`; no bloquear solo por eso |
 | `c14_aval_no_fue_cliente_moroso` | No | Si | `GET /api/filtrado-clientes/historial/:persona_id_aval` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
 | `c15_aval_no_avalo_cliente_moroso` | No | Si | MCP `run_query` + historial de clientes avalados | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
-| `c16_aval_no_avalo_liq_especial` | No | Si | MCP `run_query` en `liquidaciones` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
+| `c16_aval_no_avalo_liq_especial` | No | Si | MCP `run_query` en `liquidaciones` + cruce por `prestamoID` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Revisar `liquidaciones.tipo = 'ESPECIAL'` y cruzar con los prestamos donde el aval participo. Si el aval es persona nueva, guardar `persona_nueva` |
 | `c17_aval_no_activo_otra_agencia` | No | Si | MCP `run_query` en `prestamos_v2` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
 | `c18_domicilio_max_3_clientes` | No | Si | MCP `run_query` por `NoServicio` / `contrato` | Requiere conteo real del domicilio en prestamos activos prestamos_v2 |
 | `c19_domicilio_max_monto` | No | Si | MCP `run_query` suma saldos del domicilio | Requiere suma de saldo activo + monto nuevo MAXIMO 30,000 PARA DIAMANTE 40,000 |
@@ -133,10 +133,10 @@ curl -X POST 'http://65.21.188.158:7400/list_mariadb_structure' \
 | `r01_cliente_aval_no_comparten_domicilio` | No | Si | Solicitud + OCR comprobantes + campos de domicilio | Valida que cliente y aval no vivan en el mismo domicilio. En regla general no debe ocurrir; solo puede aceptarse si uno de los dos es propietario y se comprueba con predial o escrituras |
 | `c21_aumento_max_2000` | Si | Puede confirmar | Historial cliente + elegibilidad app | Android lo calcula primero. El aumento maximo es de 2,000 con respecto al credito anterior |
 | `c22_nivel_valido_por_scores` | Si | Puede confirmar | Historial cliente + elegibilidad app | Android lo calcula primero. NUEVO no requiere historial; NOBEL exige 1 credito con score >= 80; VIP 2; PREMIUM 3; LEAL 4; DIAMANTE ademas requiere acumulado puntual >= 50,000 |
-| `c23_no_liquido_con_descuento_y_sube` | No | Si | MCP `run_query` en `liquidaciones` + nivel anterior | Usa `si`, `no`, `no_aplica` o `persona_nueva`. Si no es renovacion o no hay contexto real de subida de nivel, guardar `no_aplica`; si el cliente es persona nueva, puede usarse `persona_nueva` si la politica operativa lo requiere |
+| `c23_no_liquido_con_descuento_y_sube` | No | Si | MCP `run_query` en `liquidaciones` + nivel anterior + cruce por `prestamoID` | Usa `si`, `no`, `no_aplica` o `persona_nueva`. Revisar `liquidaciones.tipo = 'CON_DESCUENTO'`. Solo marcar `no` si hubo liquidacion con descuento y el nivel solicitado sube. Si no es renovacion o no hay contexto real de subida de nivel, guardar `no_aplica`; si el cliente es persona nueva, puede usarse `persona_nueva` si la politica operativa lo requiere |
 | `c24_ultima_semana_respetada` | Si | Puede confirmar | Historial cliente + saldo vs tarifa | Android lo calcula primero. Si el credito activo esta en ultima semana (`saldo < tarifa`), solo puede mantener mismo monto y mismo nivel |
 | `c25_score_cliente_aceptable` | No | Si | `GET /api/filtrado-clientes/historial/:persona_id_cliente` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el cliente es persona nueva, guardar `persona_nueva` |
-| `c26_no_liq_especial_cliente` | No | Si | MCP `run_query` en `liquidaciones` del cliente | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el cliente es persona nueva, guardar `persona_nueva` |
+| `c26_no_liq_especial_cliente` | No | Si | MCP `run_query` en `liquidaciones` + cruce por `prestamoID` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Revisar `liquidaciones.tipo = 'ESPECIAL'`. Este hallazgo bloquea por si solo. Si el cliente es persona nueva, guardar `persona_nueva` |
 
 ---
 

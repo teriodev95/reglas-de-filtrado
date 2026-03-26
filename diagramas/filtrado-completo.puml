@@ -252,27 +252,35 @@ partition "**4A. Cliente — ¿existe en BD?**" {
       #D4EDDA:c24 = true;
     endif
 
-    #E8EEF8:MCP liquidaciones\nWHERE persona_id = cliente\nAND tipo_liquidacion = 'especial';
+    #E8EEF8:MCP liquidaciones + cruce por prestamoID\nWHERE tipo = 'ESPECIAL' o 'CON_DESCUENTO';
     if (¿tiene liquidación\nespecial previa?) then (SÍ)
       #FDDCDC:c26 = "no" · hallazgo bloqueante: liq. especial detectada;
       note right
         Revisar:
-        · MCP liquidaciones del cliente
-        · tipo_liquidacion = especial
+        · liquidaciones.tipo = 'ESPECIAL'
+        · cruzar liquidaciones.prestamoID
+          con prestamos_v2 / completados
+        · validar que el prestamo corresponda
+          al cliente actual
         Criterio:
         · c26 = "no" bloquea por sí solo
-        · c23 es un check adicional, no el bloqueo principal
+        · "ESPECIAL" = acuerdo por mora /
+          problema prolongado de pago
         · ver matriz-validacion-filtrado-v2.md
         · ver criterios-operativos-filtrado.md
       end note
-      if (¿c26 = "no" Y el nivel\nsolicitado sube?) then (SÍ)
+      if (¿también tiene liquidación\nCON_DESCUENTO y sube nivel?) then (SÍ)
         #FDDCDC:c23 = "no" · hallazgo adicional: liquidó con descuento y sube;
       else (NO)
         #D4EDDA:c23 = "no_aplica";
       endif
     else (NO)
       #D4EDDA:c26 = "si";
-      #D4EDDA:c23 = "si";
+      if (¿tiene liquidación\nCON_DESCUENTO y sube nivel?) then (SÍ)
+        #FDDCDC:c23 = "no" · hallazgo: liquidó con descuento y sube;
+      else (NO)
+        #D4EDDA:c23 = "si";
+      endif
     endif
 
     ' ── ¿Fue aval de alguien? ────────────────
@@ -331,9 +339,17 @@ partition "**4B. Aval — ¿existe en BD?**" {
       #D4EDDA:c15 = "si";
     endif
 
-    #E8EEF8:MCP liquidaciones\nWHERE persona_id = aval\nAND tipo_liquidacion = 'especial';
+    #E8EEF8:MCP liquidaciones + cruce por prestamoID\nWHERE tipo = 'ESPECIAL';
     if (¿el préstamo que avaló\nterminó en liq. especial?) then (SÍ)
       #FDDCDC:c16 = "no" · hallazgo: liq. especial como avalado;
+      note right
+        Revisar:
+        · liquidaciones.tipo = 'ESPECIAL'
+        · cruzar liquidaciones.prestamoID
+          con prestamos donde el aval participó
+        · no usar campo persona_id:
+          no existe en esta tabla
+      end note
     else (NO)
       #D4EDDA:c16 = "si";
     endif
