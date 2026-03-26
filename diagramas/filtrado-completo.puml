@@ -181,7 +181,8 @@ partition "**4A. Cliente — ¿existe en BD?**" {
       Resolución automática:
       c21 = no_aplica  (sin préstamo previo)
       c22 = no_aplica  (nivel NUEVO, sin historial)
-      c23 = no_aplica  (sin historial liquidaciones)
+      c23_no_sube_nivel_si_liquido_con_descuento = no_aplica
+                         (sin historial liquidaciones)
       c24 = no_aplica  (sin semana previa)
       c25 = persona_nueva
       c26 = persona_nueva
@@ -252,7 +253,7 @@ partition "**4A. Cliente — ¿existe en BD?**" {
       #D4EDDA:c24 = true;
     endif
 
-    #E8EEF8:MCP liquidaciones + cruce por prestamoID\nWHERE tipo = 'ESPECIAL' o 'CON_DESCUENTO';
+    #E8EEF8:MCP liquidaciones + cruce por prestamoID\nPrimero revisar tipo = 'ESPECIAL';
     if (¿tiene liquidación\nespecial previa?) then (SÍ)
       #FDDCDC:c26 = "no" · hallazgo bloqueante: liq. especial detectada;
       note right
@@ -269,17 +270,20 @@ partition "**4A. Cliente — ¿existe en BD?**" {
         · ver matriz-validacion-filtrado-v2.md
         · ver criterios-operativos-filtrado.md
       end note
-      if (¿también tiene liquidación\nCON_DESCUENTO y sube nivel?) then (SÍ)
-        #FDDCDC:c23 = "no" · hallazgo adicional: liquidó con descuento y sube;
-      else (NO)
-        #D4EDDA:c23 = "no_aplica";
-      endif
+      #FFF3CD:c23_no_sube_nivel_si_liquido_con_descuento = "no_aplica";
+      note right
+        Si ya existe liquidación ESPECIAL,
+        no tiene sentido seguir esta rama
+        para c23 dentro del flujo principal.
+        El rechazo ya quedó sustentado por c26.
+      end note
     else (NO)
       #D4EDDA:c26 = "si";
-      if (¿tiene liquidación\nCON_DESCUENTO y sube nivel?) then (SÍ)
-        #FDDCDC:c23 = "no" · hallazgo: liquidó con descuento y sube;
+      #E8EEF8:MCP liquidaciones + cruce por prestamoID\nAhora revisar tipo = 'CON_DESCUENTO';
+      if (¿tiene liquidación\nCON_DESCUENTO y sube nivel\nen la siguiente renovación?) then (SÍ)
+        #FDDCDC:c23_no_sube_nivel_si_liquido_con_descuento = "no" · hallazgo: no puede subir nivel por liquidación con descuento;
       else (NO)
-        #D4EDDA:c23 = "si";
+        #D4EDDA:c23_no_sube_nivel_si_liquido_con_descuento = "si";
       endif
     endif
 

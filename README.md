@@ -1,18 +1,16 @@
 # Reglas de Filtrado
 
-Documentacion operativa del filtrado autonomo para `solicitudes-app`. El proceso se divide en 7 pasos secuenciales.
+Documentacion operativa del filtrado autonomo para `solicitudes-app`.
 
-## Pasos
+## Documentos principales
 
-| Paso | Archivo | Descripcion |
+| Archivo | Descripcion |
 |---|---|---|
-| 1 | [paso-01-toma.md](paso-01-toma.md) | Toma de solicitud — GET, PATCH filtered_by, alertas tempranas |
-| 2 | [paso-02-ocr.md](paso-02-ocr.md) | OCR de documentos — INE cliente/aval, comprobantes |
-| 3 | [paso-03-correcciones.md](paso-03-correcciones.md) | Correcciones — CURP, no_servicio, nombres, domicilio |
-| 4 | [paso-04-personas.md](paso-04-personas.md) | Personas, historial y domicilio — BD + historial API |
-| 5 | [paso-05-checks.md](paso-05-checks.md) | Resolucion de checks — todos los c0x/r0x |
-| 6 | [paso-06-guardar.md](paso-06-guardar.md) | Guardar resultado — PATCH filtrado con payload completo |
-| 7 | [paso-07-verificar.md](paso-07-verificar.md) | Verificar y cerrar — GET de confirmacion + Centrifugo cierre |
+| [matriz-validacion-filtrado-v2.md](matriz-validacion-filtrado-v2.md) | Fuente principal de checks, fuentes de validacion y reglas de uso |
+| [criterios-operativos-filtrado.md](criterios-operativos-filtrado.md) | Reglas aprendidas en operacion real y criterios complementarios |
+| [diagramas/filtrado-completo.puml](diagramas/filtrado-completo.puml) | Punto de entrada visual y operativo del flujo actual |
+| [regla-complementaria-creditos-avales.md](regla-complementaria-creditos-avales.md) | Regla adicional para autorizacion de creditos a avales |
+| [referencia-politicas-originacion.md](referencia-politicas-originacion.md) | Politicas generales de originacion y huecos aun no modelados en la matriz |
 
 ## Soporte
 
