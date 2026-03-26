@@ -58,3 +58,18 @@ This repository documents the current operational rules for autonomous filtering
   - `detalle`
   - `evidencia`
   - `timestamp`
+
+## Windmill Test Loop
+
+- Use Windmill only as execution layer; validate outcomes against the repo rules.
+- Start test cases from:
+  - `GET /api/solicitudes-app/pruebas-libres`
+- Reset before a clean rerun when needed:
+  - full set: `POST /api/solicitudes-app/pruebas-libres/reset`
+  - one request: `POST /api/solicitudes-app/pruebas-libres/{id}/reset`
+- Contrast every run against:
+  - `diagramas/filtrado-completo.puml`
+  - `matriz-validacion-filtrado-v2.md`
+  - `criterios-operativos-filtrado.md`
+- If manual filtering produces a better result than Windmill, update the Windmill step or prompt and rerun the same request.
+- If `GET /api/solicitudes-app/{id}` returns `info = "pruebas libres"`, the request is part of the free-test cycle.

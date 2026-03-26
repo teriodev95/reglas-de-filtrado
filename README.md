@@ -11,6 +11,7 @@ Documentacion operativa del filtrado autonomo para `solicitudes-app`.
 | [diagramas/filtrado-completo.puml](diagramas/filtrado-completo.puml) | Punto de entrada visual y operativo del flujo actual |
 | [regla-complementaria-creditos-avales.md](regla-complementaria-creditos-avales.md) | Regla adicional para autorizacion de creditos a avales |
 | [referencia-politicas-originacion.md](referencia-politicas-originacion.md) | Politicas generales de originacion y huecos aun no modelados en la matriz |
+| [pruebas-windmill-filtrado.md](pruebas-windmill-filtrado.md) | Flujo corto para probar, reiniciar, contrastar e iterar filtrado con Windmill |
 
 ## Soporte
 
