@@ -414,6 +414,22 @@ partition "**4C. Domicilio — c18, c19, c20**" {
     comprometido en otro préstamo activo.
     Puede estar en cualquier agencia,
     gerencia o sucursal.
+    ——
+    **IMPORTANTE — atribución correcta (fix 2026-07-05):**
+    Esta sección SIEMPRE consulta
+    captura.cliente.no_servicio, nunca el del aval.
+    Por lo tanto c18/c19/c20 son hallazgos sobre el
+    domicilio del CLIENTE. El texto de motivo_rechazo
+    y de hallazgos[].mensaje debe decir explícitamente
+    "el domicilio del CLIENTE", NUNCA "del aval".
+    Verificado contra 161 solicitudes históricas:
+    en el 100% de los casos con contexto_filtrado
+    disponible, el NoServicio que dispara c20 coincide
+    con cliente_no_servicio — nunca con aval_no_servicio.
+    Si en el futuro se agrega una consulta equivalente
+    contra captura.aval.no_servicio, ESA sí debe decir
+    "del aval"; hasta entonces, "del aval" es incorrecto
+    siempre que aparezca en el texto de este check.
   end note
 
   if (¿total clientes activos\nen domicilio > 3?) then (SÍ)
@@ -433,19 +449,27 @@ partition "**4C. Domicilio — c18, c19, c20**" {
   endif
 
   if (¿el mismo domicilio aparece\nen otro préstamo activo?) then (SÍ)
-    #FDDCDC:c20_domicilio_no_cruce_en_prestamo_activo = false · hallazgo: domicilio cruzado en otro préstamo activo;
+    #FDDCDC:c20_domicilio_no_cruce_en_prestamo_activo = false · hallazgo: domicilio del CLIENTE cruzado en otro préstamo activo (nombrar al titular encontrado);
     note right
-      Query MCP de referencia:
+      Query MCP de referencia (fix 2026-07-05:
+      se agregó Nombres/Apellido_Paterno/Apellido_Materno,
+      antes faltaban y el hallazgo salía sin nombre):
       SELECT
         p.NoServicio,
         p.PrestamoID,
+        p.Nombres,
+        p.Apellido_Paterno,
+        p.Apellido_Materno,
+        p.cliente_persona_id,
         p.Agente AS agencia_encontrada,
         a.GerenciaID AS gerencia_encontrada,
         g.SucursalID AS sucursal_encontrada,
         s.nombre AS sucursal_nombre,
-        p.Saldo,
+        pd.saldo AS saldo_real,
         p.created_at
       FROM prestamos_v2 p
+      INNER JOIN prestamos_dynamic pd
+        ON pd.prestamo_id = p.PrestamoID
       LEFT JOIN agencias a
         ON a.AgenciaID = p.Agente
       LEFT JOIN gerencias g
@@ -453,13 +477,32 @@ partition "**4C. Domicilio — c18, c19, c20**" {
       LEFT JOIN sucursales s
         ON s.sucursalID = g.SucursalID
       WHERE p.NoServicio = '{no_servicio_corregido}'
-        AND p.Saldo > 0
+        AND pd.saldo > 0                                   -- SALDO REAL vigente, NO p.Saldo (estático)
+        AND p.cliente_persona_id <> '{persona_id_cliente}' -- excluir el propio crédito del cliente (renovación)
         AND p.PrestamoID <> '{prestamo_actual_si_existe}';
+      ——
+      IMPORTANTE (fix 2026-07): antes usaba p.Saldo (estático,
+      no baja con los pagos) → marcaba como "activo" créditos ya
+      pagados. El saldo real vive en prestamos_dynamic.saldo.
+      Con p.Saldo el 65% de los c20=false eran falsos positivos.
+      ——
+      Si el PrestamoID no aparece en prestamos_v2 (ya
+      completado), repetir la misma búsqueda por
+      NoServicio contra prestamos_completados (join a
+      personas por cliente_persona_id para el nombre) —
+      esa tabla también contiene préstamos con Status
+      activo de ciertas sucursales, no solo liquidados.
       ——
       Si devuelve filas:
       · c20_domicilio_no_cruce_en_prestamo_activo = false
       · documentar agencia_encontrada,
-        gerencia_encontrada y sucursal_nombre
+        gerencia_encontrada, sucursal_nombre
+        Y Nombres+Apellido_Paterno+Apellido_Materno
+      · motivo_rechazo debe citar el nombre encontrado,
+        ejemplo:
+        "El domicilio del cliente (NoServicio X) ya está
+        comprometido en el préstamo activo Y de JUAN
+        PEREZ LOPEZ, saldo $Z."
     end note
   else (NO)
     #D4EDDA:c20_domicilio_no_cruce_en_prestamo_activo = true;

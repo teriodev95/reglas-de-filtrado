@@ -102,6 +102,26 @@ curl -X POST 'http://65.21.188.158:7400/list_mariadb_structure' \
 - `personas`
 - `liquidaciones`
 
+> ### ⚠️ SALDO: usar SIEMPRE `prestamos_dynamic.saldo`, NUNCA `prestamos_v2.Saldo`
+>
+> `prestamos_v2.Saldo` es un valor **estático/congelado** que NO se actualiza con los
+> pagos semanales — puede mostrar saldo pendiente de un crédito **ya liquidado**.
+> El **saldo real vigente** vive en `prestamos_dynamic.saldo` (misma fuente que usan
+> liquidaciones y cobranza; `saldo <= 0` = YA LIQUIDADO). Cualquier check que dependa
+> del saldo (c18, c19, c20, c24) DEBE unir a `prestamos_dynamic` por `prestamo_id` y
+> usar `prestamos_dynamic.saldo`. Ejemplo:
+>
+> ```sql
+> FROM prestamos_v2 p
+> INNER JOIN prestamos_dynamic pd ON pd.prestamo_id = p.PrestamoID
+> WHERE p.NoServicio = '{no_servicio}'
+>   AND pd.saldo > 0          -- saldo REAL vigente, no p.Saldo
+> ```
+>
+> **Verificado (2026-07):** con `p.Saldo` el 65% de los `c20 = false` eran falsos
+> positivos (clientes renovando su propio crédito **ya pagado**, ej. LAURA BUENO
+> MONARCA: `p.Saldo=910.62` vs `pd.saldo=-0.38`). Con `pd.saldo` desaparecen.
+
 ---
 
 ## Matriz
@@ -127,14 +147,14 @@ curl -X POST 'http://65.21.188.158:7400/list_mariadb_structure' \
 | `c15_aval_no_avalo_cliente_moroso` | No | Si | MCP `run_query` + historial de clientes avalados | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
 | `c16_aval_no_avalo_liq_especial` | No | Si | MCP `run_query` en `liquidaciones` + cruce por `prestamoID` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Revisar `liquidaciones.tipo = 'ESPECIAL'` y cruzar con los prestamos donde el aval participo. Si el aval es persona nueva, guardar `persona_nueva` |
 | `c17_aval_no_activo_otra_agencia` | No | Si | MCP `run_query` en `prestamos_v2` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el aval es persona nueva, guardar `persona_nueva` |
-| `c18_domicilio_max_3_clientes` | No | Si | MCP `run_query` por `NoServicio` / `contrato` | Requiere conteo real del domicilio en prestamos activos prestamos_v2 |
-| `c19_domicilio_max_monto` | No | Si | MCP `run_query` suma saldos del domicilio | Requiere suma de saldo activo + monto nuevo MAXIMO 30,000 PARA DIAMANTE 40,000 |
-| `c20_domicilio_no_cruce_en_prestamo_activo` | No | Si | MCP `run_query` en `prestamos_v2` por `NoServicio` + joins a `agencias`, `gerencias`, `sucursales` | Valida que el mismo domicilio no aparezca ya comprometido en otro prestamo activo. Si aparece en cualquier otra agencia, gerencia o sucursal, guardar `false` y documentar donde se encontro |
+| `c18_domicilio_max_3_clientes` | No | Si | MCP `run_query` por `NoServicio`, unido a `prestamos_dynamic` con `pd.saldo > 0` | Conteo real de clientes con préstamo **vigente** en el domicilio. Contar solo los que tienen `prestamos_dynamic.saldo > 0` (los liquidados no cuentan) |
+| `c19_domicilio_max_monto` | No | Si | MCP `run_query` suma de `prestamos_dynamic.saldo` del domicilio | Suma del **saldo real vigente** (`pd.saldo`, no `p.Saldo`) + monto nuevo MAXIMO 30,000 PARA DIAMANTE 40,000 |
+| `c20_domicilio_no_cruce_en_prestamo_activo` | No | Si | MCP `run_query` en `prestamos_v2` **JOIN `prestamos_dynamic`** por `NoServicio` + joins a `agencias`, `gerencias`, `sucursales` | Valida que el mismo domicilio no aparezca ya comprometido en otro prestamo **con saldo real vigente**. **Usar `prestamos_dynamic.saldo > 0`, NUNCA `p.Saldo > 0`** (p.Saldo es estático y marca como activos créditos ya pagados → falsos positivos). Se consulta siempre `captura.cliente.no_servicio` (nunca el del aval) — el hallazgo es sobre el domicilio del **cliente**. Excluir el `PrestamoID` del propio cliente si es su renovación. Si aparece un tercero con `pd.saldo > 0` en cualquier agencia/gerencia/sucursal, guardar `false` y documentar el titular (join a `Nombres`/`Apellido_Paterno`/`Apellido_Materno`) y el saldo real. `motivo_rechazo` debe decir "domicilio del cliente", nunca "domicilio del aval" |
 | `r01_cliente_aval_no_comparten_domicilio` | No | Si | Solicitud + OCR comprobantes + campos de domicilio | Valida que cliente y aval no vivan en el mismo domicilio. En regla general no debe ocurrir; solo puede aceptarse si uno de los dos es propietario y se comprueba con predial o escrituras |
 | `c21_aumento_max_2000` | Si | Puede confirmar | Historial cliente + elegibilidad app | Android lo calcula primero. El aumento maximo es de 2,000 con respecto al credito anterior |
 | `c22_nivel_valido_por_scores` | Si | Puede confirmar | Historial cliente + elegibilidad app | Android lo calcula primero. NUEVO no requiere historial; NOBEL exige 1 credito con score >= 80; VIP 2; PREMIUM 3; LEAL 4; DIAMANTE ademas requiere acumulado puntual >= 50,000 |
 | `c23_no_sube_nivel_si_liquido_con_descuento` | No | Si | MCP `run_query` en `liquidaciones` + nivel anterior + cruce por `prestamoID` | Valida que si el cliente liquido un credito anterior con descuento (`liquidaciones.tipo = 'CON_DESCUENTO'`), no pueda subir de nivel en la siguiente renovacion. Puede aumentar monto si cumple politicas y capacidad de pago. Usa `si`, `no`, `no_aplica` o `persona_nueva`. Si no es renovacion o no hay contexto real de subida de nivel, guardar `no_aplica`; si el cliente es persona nueva, puede usarse `persona_nueva` si la politica operativa lo requiere |
-| `c24_ultima_semana_respetada` | Si | Puede confirmar | Historial cliente + saldo vs tarifa | Android lo calcula primero. Si el credito activo esta en ultima semana (`saldo < tarifa`), solo puede mantener mismo monto y mismo nivel |
+| `c24_ultima_semana_respetada` | Si | Puede confirmar | Historial cliente + `prestamos_dynamic.saldo` vs tarifa | Android lo calcula primero. "Última semana" = `prestamos_dynamic.saldo < tarifa` (saldo REAL vigente, no `p.Saldo`). Si el crédito activo está en última semana, solo puede mantener mismo monto y mismo nivel. Si `pd.saldo <= 0` el crédito ya está liquidado y no restringe |
 | `c25_score_cliente_aceptable` | No | Si | `GET /api/filtrado-clientes/historial/:persona_id_cliente` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Si el cliente es persona nueva, guardar `persona_nueva` |
 | `c26_no_liq_especial_cliente` | No | Si | MCP `run_query` en `liquidaciones` + cruce por `prestamoID` | Usa `si`, `no`, `persona_nueva` o `no_aplica`. Revisar `liquidaciones.tipo = 'ESPECIAL'`. Este hallazgo bloquea por si solo. Si el cliente es persona nueva, guardar `persona_nueva` |
 
